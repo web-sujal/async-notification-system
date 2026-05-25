@@ -1,19 +1,19 @@
-import { Request, Response, NextFunction } from 'express';
+import { NextFunction, Request, Response } from "express";
+import { StatusCodes } from "http-status-codes";
 
-import { ApiError, ApiErrorBody } from '../utils/apiError';
-import { StatusCodes } from '../utils/constants';
+import { ApiError, ApiErrorBody } from "../utils/apiError.js";
 
 export function errorHandler(
   err: unknown,
   _req: Request,
   res: Response,
-  _next: NextFunction
+  _next: NextFunction,
 ): void {
   console.error(err);
 
   if (!(err instanceof ApiError)) {
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      error: { message: 'Internal server error' } satisfies ApiErrorBody,
+      error: { message: "Internal server error" } satisfies ApiErrorBody,
     });
     return;
   }
