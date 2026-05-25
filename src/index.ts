@@ -10,7 +10,7 @@ import { config } from "./config/config.js";
 import { errorHandler } from "./middlewares/error.middleware.js";
 import { v1Router } from "./routes/v1/index.js";
 import { sendData } from "./utils/apiSuccess.js";
-import logger from "./utils/logger.js";
+import logger from "./config/logger.js";
 
 const app = express();
 

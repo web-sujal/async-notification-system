@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import { StatusCodes } from "http-status-codes";
 
 import { ApiError, ApiErrorBody } from "../utils/apiError.js";
-import logger from "../utils/logger.js";
+import logger from "../config/logger.js";
 
 export function errorHandler(
   err: unknown,
