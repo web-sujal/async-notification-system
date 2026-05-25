@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import { StatusCodes } from "http-status-codes";
 
 import { ApiError, ApiErrorBody } from "../utils/apiError.js";
+import logger from "../utils/logger.js";
 
 export function errorHandler(
   err: unknown,
@@ -9,7 +10,7 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  console.error(err);
+  logger.error(err);
 
   if (!(err instanceof ApiError)) {
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
