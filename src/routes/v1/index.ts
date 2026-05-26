@@ -1,6 +1,6 @@
 import { Router } from "express";
-import notificationRoute from "./notification.route.js";
+import notificationRouter from "./notification.route.js";
 
 export const v1Router = Router();
 
-v1Router.use("/notifications", notificationRoute);
+v1Router.use("/notifications", notificationRouter);
