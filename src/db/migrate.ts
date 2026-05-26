@@ -11,7 +11,7 @@ const runMigration = async (): Promise<void> => {
     // 1. Create tracking table if not exists
     await sql`CREATE TABLE IF NOT EXISTS schema_migrations (
       version TEXT NOT NULL PRIMARY KEY,
-      executed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      executed_at TIMESTAMP WITH TIME ZONE DEFAULT now()
     )`;
 
     // 2. Read and sort migration files from migrations directory
@@ -40,7 +40,7 @@ const runMigration = async (): Promise<void> => {
       // Execute the raw sql inside a transaction
       await sql.begin(async (tx) => {
         await tx.unsafe(`${sqlContent}`);
-        await tx`INSERT INTO schema_migrations (version) VALUES (${version})`;
+        await tx`INSERT INTO schema_migrations (version) VALUES (${version});`;
       });
 
       logger.info(`✅ Successfully executed ${version}...`);
