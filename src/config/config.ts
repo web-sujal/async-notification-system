@@ -16,6 +16,8 @@ const envSchema = z.object({
 
   DATABASE_URL: z.string(),
   DATABASE_MAX_POOL: z.coerce.number().default(20),
+
+  REDIS_URL: z.string(),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -49,6 +51,9 @@ export const config = {
   database: {
     url: env.DATABASE_URL,
     maxPool: env.DATABASE_MAX_POOL,
+  },
+  redis: {
+    url: env.REDIS_URL,
   },
 } as const;
 
