@@ -7,10 +7,11 @@ import { StatusCodes } from "http-status-codes";
 import morgan from "morgan";
 
 import { config } from "./config/config.js";
+import { connectDb } from "./config/db.js";
+import logger from "./config/logger.js";
 import { errorHandler } from "./middlewares/error.middleware.js";
 import { v1Router } from "./routes/v1/index.js";
 import { sendData } from "./utils/apiSuccess.js";
-import logger from "./config/logger.js";
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use(express.json());
 
 app.get("/health", (_req, res) => {
   logger.info("health check");
+  console.log("process.cwd()", process.cwd());
   return sendData(res, { status: "ok", message: "Server is running" });
 });
 
@@ -53,6 +55,8 @@ app.use("/api/v1", v1Router);
 app.use(errorHandler);
 
 async function bootstrap() {
+  await connectDb();
+
   app.listen(config.server.port, () => {
     console.log(`🚀 Server running on http://localhost:${config.server.port}`);
     logger.info(`Server running on http://localhost:${config.server.port}`);

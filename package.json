@@ -1,7 +1,7 @@
 {
-  "name": "express-app-template",
+  "name": "async-notification-system",
   "version": "1.0.0",
-  "description": "Opinionated Express + TypeScript starter template.",
+  "description": "Async Notification System",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -13,7 +13,13 @@
     "test": "NODE_ENV=test vitest run",
     "test:watch": "NODE_ENV=test vitest"
   },
-  "keywords": ["express", "typescript", "template", "starter"],
+  "keywords": [
+    "express",
+    "typescript",
+    "async",
+    "notification",
+    "system"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -23,6 +29,7 @@
     "helmet": "^8.1.0",
     "http-status-codes": "^2.3.0",
     "morgan": "^1.10.1",
+    "postgres": "^3.4.9",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
     "zod": "^4.4.3"
