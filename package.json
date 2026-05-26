@@ -11,7 +11,8 @@
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
     "test": "NODE_ENV=test vitest run",
-    "test:watch": "NODE_ENV=test vitest"
+    "test:watch": "NODE_ENV=test vitest",
+    "migration:run": "tsx src/db/migrate.ts"
   },
   "keywords": [
     "express",
