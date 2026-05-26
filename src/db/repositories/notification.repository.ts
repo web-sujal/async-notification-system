@@ -6,9 +6,10 @@ import {
   toNotification,
 } from "../schemas/index.js";
 
-export const notificationRepository = {
-  create: async (notification: CreateNotification): Promise<Notification> => {
-    const [res] = await sql<NotificationRow[]>`
+export const create = async (
+  notification: CreateNotification,
+): Promise<Notification> => {
+  const [res] = await sql<NotificationRow[]>`
         INSERT INTO notifications (title, content)
         VALUES (
           ${notification.title},
@@ -17,6 +18,5 @@ export const notificationRepository = {
 
         RETURNING *`;
 
-    return toNotification(res);
-  },
+  return toNotification(res);
 };

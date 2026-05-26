@@ -1,1 +1,1 @@
-export * from "./notification.repository.js";
+export * as notificationRepository from "./notification.repository.js";
