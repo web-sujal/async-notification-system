@@ -1,0 +1,2 @@
+ALTER TABLE notifications
+ADD COLUMN is_delivered BOOLEAN DEFAULT FALSE;
