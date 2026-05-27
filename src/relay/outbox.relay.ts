@@ -6,6 +6,10 @@ import {
 } from "../utils/constants.js";
 import { sleep } from "../utils/index.js";
 
+const BATCH_SIZE = 20;
+const IDLE_SLEEP_MS = 500;
+const ERROR_SLEEP_MS = 3000;
+
 export const startOutboxRelay = async () => {
   let isRunning = true;
 
@@ -16,41 +20,38 @@ export const startOutboxRelay = async () => {
 
   while (isRunning) {
     try {
-      const BATCH_SIZE = 20;
+      const events = await outboxRepository.fetchPendingEvents(BATCH_SIZE);
 
-      const processedCount = await outboxRepository.processOutboxBatch(
-        BATCH_SIZE,
-        async (event) => {
-          // Add job to notification queue
-          await notificationQueue.add(
-            SEND_NOTIFICATION_JOB_NAME,
-            event.payload,
-            {
-              jobId: event.aggregateId,
-              attempts: DEFAULT_NOTIFICATION_RETRY_ATTEMPTS,
-              backoff: {
-                type: "exponential",
-                delay: 2000,
-              },
-            },
-          );
-        },
-      );
-
-      // If nothing to process, sleep to prevent CPU/DB thrashing
-      if (processedCount === 0) {
+      if (events.length === 0) {
         console.log("💤 No pending events found, sleeping for 500ms");
-        await sleep(500);
-      } else {
-        console.log(
-          `✅ Successfully published batch of ${processedCount} events.`,
-        );
+        await sleep(IDLE_SLEEP_MS);
+        continue;
       }
+
+      let publishedCount = 0;
+
+      for (const event of events) {
+        await notificationQueue.add(
+          SEND_NOTIFICATION_JOB_NAME,
+          event.payload,
+          {
+            jobId: event.aggregateId,
+            attempts: DEFAULT_NOTIFICATION_RETRY_ATTEMPTS,
+            backoff: {
+              type: "exponential",
+              delay: 2000,
+            },
+          },
+        );
+
+        await outboxRepository.markProcessed(event.id);
+        publishedCount++;
+      }
+
+      console.log(`✅ Successfully published ${publishedCount} events.`);
     } catch (err) {
       console.error("Error processing outbox events", err);
-
-      // Sleep for 3 seconds to prevent DB spam
-      await sleep(3000);
+      await sleep(ERROR_SLEEP_MS);
     }
   }
 

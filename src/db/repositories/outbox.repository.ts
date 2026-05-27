@@ -27,38 +27,24 @@ export const insertOutboxEvent = (
     );
   `;
 
-export const processOutboxBatch = async (
+export const fetchPendingEvents = async (
   batchSize = 20,
-  callback: (event: OutboxEvent) => Promise<void>,
-): Promise<number> => {
-  return sql.begin(async (tx) => {
-    // Lock rows for update to prevent race conditions
-    const rows = await tx<OutboxEventRow[]>`
-      SELECT * FROM outbox_events
-      WHERE processed_at IS NULL
-      ORDER BY created_at ASC
-      LIMIT ${batchSize}
-      FOR UPDATE SKIP LOCKED;
-    `;
+): Promise<OutboxEvent[]> => {
+  const rows = await sql<OutboxEventRow[]>`
+    SELECT * FROM outbox_events
+    WHERE processed_at IS NULL
+    ORDER BY created_at ASC
+    LIMIT ${batchSize};
+  `;
 
-    if (rows.length === 0) {
-      return 0;
-    }
+  return rows.map(toOutboxEvent);
+};
 
-    const events = rows.map(toOutboxEvent);
-
-    for (const event of events) {
-      // Execute the BullMQ push operation via callback
-      await callback(event);
-
-      // Mark outbox event as processed
-      await tx`
-        UPDATE outbox_events
-        SET processed_at = now()
-        WHERE id = ${event.id}
-      `;
-    }
-
-    return events.length;
-  });
+export const markProcessed = async (id: string): Promise<void> => {
+  await sql`
+    UPDATE outbox_events
+    SET processed_at = now()
+    WHERE id = ${id}
+      AND processed_at IS NULL;
+  `;
 };

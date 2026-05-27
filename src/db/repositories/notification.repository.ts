@@ -3,7 +3,6 @@ import type { Sql, TransactionSql } from "postgres";
 import { sql } from "../../config/db.js";
 import {
   CreateNotification,
-  CreateOutboxEvent,
   Notification,
   NotificationRow,
   toNotification,
@@ -77,7 +76,7 @@ export const createNotificationWithOutboxEvent = async (
       aggregateType: NOTIFICATION_QUEUE_NAME,
       eventType: SEND_NOTIFICATION_JOB_NAME,
       payload: {
-        notficationId: createdNotif.id,
+        notificationId: createdNotif.id,
       },
     });
 
