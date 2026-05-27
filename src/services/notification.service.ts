@@ -12,3 +12,8 @@ export const createNotification = async (notification: CreateNotification) => {
 
   return res;
 };
+
+export const markNotificationAsDelivered = async (notificationId: string) => {
+  const res = await notificationRepository.markDelivered(notificationId);
+  return res;
+};
