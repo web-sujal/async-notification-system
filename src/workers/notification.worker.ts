@@ -10,9 +10,10 @@ import {
   FAILED_NOTIFICATION_JOB_NAME,
   NOTIFICATION_QUEUE_NAME,
 } from "../utils/constants.js";
+import { config } from "../config/config.js";
 
 const processJob = async (job: Job<{ notificationId: string }>) => {
-  if (Math.random() < 0.5) {
+  if (config.flags.isFailureModeEnabled && Math.random() < 0.5) {
     throw new ApiError(StatusCodes.INTERNAL_SERVER_ERROR, "Random error");
   }
 
@@ -28,6 +29,9 @@ const processJob = async (job: Job<{ notificationId: string }>) => {
     throw new ApiError(StatusCodes.NOT_FOUND, "Notification not found");
   }
 
+  if (config.flags.isDelayModeEnabled) {
+    await new Promise((r) => setTimeout(r, config.flags.delayModeDelay));
+  }
   console.log(`✅ Notification ${notificationId} marked as delivered`);
   return;
 };

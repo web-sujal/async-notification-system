@@ -7,12 +7,12 @@ import {
 } from "../utils/constants.js";
 
 export const createNotification = async (notification: CreateNotification) => {
-  const res = await notificationRepository.create(notification);
+  const notif = await notificationRepository.create(notification);
 
   await notificationQueue.add(
     SEND_NOTIFICATION_JOB_NAME,
     {
-      notificationId: res.id,
+      notificationId: notif.id,
     },
     {
       attempts: DEFAULT_NOTIFICATION_RETRY_ATTEMPTS,
@@ -20,10 +20,11 @@ export const createNotification = async (notification: CreateNotification) => {
         type: "exponential",
         delay: 2000,
       },
+      jobId: notif.id,
     },
   );
 
-  return res;
+  return notif;
 };
 
 export const markNotificationAsDelivered = async (notificationId: string) => {

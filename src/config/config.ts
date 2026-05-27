@@ -3,6 +3,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+const booleanString = z
+  .string()
+  .toLowerCase()
+  .transform((val) => val === "true" || val === "1")
+  .default(false);
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
@@ -18,6 +24,10 @@ const envSchema = z.object({
   DATABASE_MAX_POOL: z.coerce.number().default(20),
 
   REDIS_URL: z.string(),
+
+  ENABLE_FAILURE_MODE: booleanString,
+  ENABLE_DELAY_MODE: booleanString,
+  DELAY_MODE_DELAY: z.coerce.number().default(500),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -54,6 +64,11 @@ export const config = {
   },
   redis: {
     url: env.REDIS_URL,
+  },
+  flags: {
+    isFailureModeEnabled: env.ENABLE_FAILURE_MODE,
+    isDelayModeEnabled: env.ENABLE_DELAY_MODE,
+    delayModeDelay: env.DELAY_MODE_DELAY,
   },
 } as const;
 
