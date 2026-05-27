@@ -1,18 +1,21 @@
 # Architecture
 
-Async Notification System — an Express + TypeScript API backed by PostgreSQL.
+Async Notification System — an Express + TypeScript API backed by PostgreSQL and Redis (BullMQ).
+
+> Setup and run instructions: [README.md](./README.md)
 
 ## Tech stack
 
-| Layer | Choice |
-| ----- | ------ |
-| Runtime | Node.js (ESM) |
-| HTTP | Express 5 |
-| Language | TypeScript |
-| Database | PostgreSQL via [postgres.js](https://github.com/porsager/postgres) |
-| Validation | Zod |
-| Logging | Winston (file-only) + Morgan (HTTP, terminal) |
-| Tests | Vitest + Supertest |
+| Layer      | Choice                                                             |
+| ---------- | ------------------------------------------------------------------ |
+| Runtime    | Node.js (ESM)                                                      |
+| HTTP       | Express 5                                                          |
+| Language   | TypeScript                                                         |
+| Database   | PostgreSQL via [postgres.js](https://github.com/porsager/postgres) |
+| Validation | Zod                                                                |
+| Logging    | Winston (file-only) + Morgan (HTTP, terminal)                      |
+| Queue      | BullMQ + Redis                                                     |
+| Tests      | Vitest + Supertest                                                 |
 
 ## Project structure
 
@@ -27,6 +30,9 @@ src/
 ├── middlewares/      # global error handler
 ├── routes/v1/        # route wiring + middleware
 ├── services/         # business logic
+├── queues/           # BullMQ queue (producer)
+├── workers/          # BullMQ worker (consumer)
+├── worker.ts         # worker process entry point
 └── utils/            # ApiError, asyncHandler, validate, sendData
 
 migrations/           # numbered .sql migration files
@@ -156,11 +162,11 @@ asyncHandler  →  catches async throws  →  next(err)
 errorHandler  →  logger.error(err)  →  JSON response
 ```
 
-| Layer | Pattern |
-| ----- | ------- |
-| Controller | Wrapped in `asyncHandler`; no try/catch |
-| Service | `throw new ApiError(status, message)` for business errors |
-| Repository | Let `PostgresError` bubble unless service translates it |
+| Layer             | Pattern                                                      |
+| ----------------- | ------------------------------------------------------------ |
+| Controller        | Wrapped in `asyncHandler`; no try/catch                      |
+| Service           | `throw new ApiError(status, message)` for business errors    |
+| Repository        | Let `PostgresError` bubble unless service translates it      |
 | Service try/catch | Only when mapping a low-level error to a specific `ApiError` |
 
 Validation middleware (`validate`) parses `req.body` with Zod and throws `ApiError(400, ...)` on failure.
@@ -176,11 +182,11 @@ Validation middleware (`validate`) parses `req.body` with Zod and throws `ApiErr
 
 ### Naming convention
 
-| Where | Convention | Example |
-| ----- | ---------- | ------- |
-| Postgres columns | snake_case | `is_seen`, `created_at` |
-| TypeScript / API | camelCase | `isSeen`, `createdAt` |
-| Mapping | `toNotification()` in schemas | single place per entity |
+| Where            | Convention                    | Example                 |
+| ---------------- | ----------------------------- | ----------------------- |
+| Postgres columns | snake_case                    | `is_seen`, `created_at` |
+| TypeScript / API | camelCase                     | `isSeen`, `createdAt`   |
+| Mapping          | `toNotification()` in schemas | single place per entity |
 
 Do not use `postgres.camel` transform. Keep SQL readable; map explicitly.
 
@@ -213,11 +219,11 @@ Write plain SQL — no trailing commas, use `(` not `{` for table definitions. E
 
 Two separate channels by design:
 
-| Channel | Output | Used for |
-| ------- | ------ | -------- |
-| **Morgan** | Terminal | HTTP access logs |
-| **console.log/error** | Terminal | Startup messages, fatal bootstrap errors |
-| **Winston logger** | Files only | App events, errors, audit trail |
+| Channel               | Output     | Used for                                 |
+| --------------------- | ---------- | ---------------------------------------- |
+| **Morgan**            | Terminal   | HTTP access logs                         |
+| **console.log/error** | Terminal   | Startup messages, fatal bootstrap errors |
+| **Winston logger**    | Files only | App events, errors, audit trail          |
 
 Log files (rotated daily via symlinks):
 
@@ -241,26 +247,26 @@ Format:
 
 ### Where to log
 
-| Layer | Log? |
-| ----- | ---- |
-| `error.middleware` | Yes — every error |
-| Service | Yes — business events (created, delivered, retry) |
-| Repository | No — let errors bubble |
-| Controller | Avoid — keep HTTP layer thin |
+| Layer              | Log?                                              |
+| ------------------ | ------------------------------------------------- |
+| `error.middleware` | Yes — every error                                 |
+| Service            | Yes — business events (created, delivered, retry) |
+| Repository         | No — let errors bubble                            |
+| Controller         | Avoid — keep HTTP layer thin                      |
 
 ## Configuration
 
 Environment variables are validated at startup in `src/config/config.ts` with Zod. See `.env.example`.
 
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `NODE_ENV` | `development` | `development` \| `production` \| `test` |
-| `PORT` | `8080` | HTTP port |
-| `CORS_ORIGINS` | (empty) | Comma-separated origins; empty = allow all in dev |
-| `LOG_DIR` | `logs` | Log file directory |
-| `LOG_LEVEL` | `warn` | Min level in production (`debug` forced in dev) |
-| `DATABASE_URL` | required | Postgres connection string |
-| `DATABASE_MAX_POOL` | `20` | Max pool connections |
+| Variable            | Default       | Description                                       |
+| ------------------- | ------------- | ------------------------------------------------- |
+| `NODE_ENV`          | `development` | `development` \| `production` \| `test`           |
+| `PORT`              | `8080`        | HTTP port                                         |
+| `CORS_ORIGINS`      | (empty)       | Comma-separated origins; empty = allow all in dev |
+| `LOG_DIR`           | `logs`        | Log file directory                                |
+| `LOG_LEVEL`         | `warn`        | Min level in production (`debug` forced in dev)   |
+| `DATABASE_URL`      | required      | Postgres connection string                        |
+| `DATABASE_MAX_POOL` | `20`          | Max pool connections                              |
 
 Invalid env vars print to stderr and exit before the server starts.
 
@@ -279,20 +285,23 @@ export * as notificationRepository from "./notification.repository.js";
 notificationRepository.create(data);
 ```
 
-| Layer | Method naming | Example |
-| ----- | ------------- | ------- |
-| Repository | Short verbs | `create`, `findById`, `update` |
-| Service | Full business names | `createNotification` |
-| Controller | Match service | `createNotification` |
+| Layer      | Method naming       | Example                        |
+| ---------- | ------------------- | ------------------------------ |
+| Repository | Short verbs         | `create`, `findById`, `update` |
+| Service    | Full business names | `createNotification`           |
+| Controller | Match service       | `createNotification`           |
 
 ## Scripts
 
+w
 | Command | Description |
 | ------- | ----------- |
 | `pnpm dev` | Dev server with hot reload (`tsx --watch`) |
 | `pnpm build` | Compile to `dist/` |
 | `pnpm start` | Run compiled app |
 | `pnpm migration:run` | Apply pending SQL migrations |
+| `pnpm dev:worker` | start bullmq worker with hot reload |
+| `pnpm worker` | start bullmq worker |
 | `pnpm test` | Run Vitest tests |
 | `pnpm lint` | ESLint |
 | `pnpm format` | Prettier |

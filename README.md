@@ -1,49 +1,67 @@
-# Express App Template
+# Async Notification System
 
-Opinionated Express + TypeScript starter with config validation, structured errors, file logging, and health checks.
+Express + TypeScript API that creates notifications in PostgreSQL and delivers them asynchronously via BullMQ.
+
+## Prerequisites
+
+- Node.js 20+
+- pnpm
+- PostgreSQL
+- Redis
 
 ## Quick start
 
 ```bash
-git clone <this-repo> my-new-app
-cd my-new-app
 pnpm install
 cp .env.example .env
-pnpm dev
+pnpm migration:run
 ```
 
-## Using as a template
-
-1. Clone or click **Use this template** on GitHub.
-2. Rename `name` in `package.json`.
-3. Update this README title and description.
-4. Point git remote at your new repo:
+Run the API and worker in **separate terminals**:
 
 ```bash
-git remote set-url origin git@github.com:you/my-new-app.git
-```
-
-## Scripts
-
-| Command        | Description                    |
-| -------------- | ------------------------------ |
-| `pnpm dev`     | Start dev server with hot reload |
-| `pnpm build`   | Compile TypeScript to `dist/`  |
-| `pnpm start`   | Run compiled app               |
-| `pnpm test`    | Run tests                      |
-| `pnpm lint`    | Lint TypeScript                |
-| `pnpm format`  | Format with Prettier           |
-
-## Project layout
-
-```
-src/
-├── config/          # env validation (zod)
-├── middlewares/     # error handler, etc.
-├── routes/v1/     # API routes
-└── utils/         # logger, ApiError, helpers
+pnpm dev          # http://localhost:8080
+pnpm dev:worker   # processes delivery jobs
 ```
 
 ## Environment
 
-See `.env.example`. Logs are written to `logs/` (file only); HTTP request logs go to the terminal via Morgan.
+See `.env.example`. Required variables:
+
+| Variable | Description |
+| -------- | ----------- |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+| `PORT` | HTTP port (default `8080`) |
+
+## Scripts
+
+| Command | Description |
+| ------- | ----------- |
+| `pnpm dev` | API with hot reload |
+| `pnpm dev:worker` | Worker with hot reload |
+| `pnpm migration:run` | Apply SQL migrations |
+| `pnpm build` | Compile to `dist/` |
+| `pnpm start` | Run compiled API |
+| `pnpm worker` | Run compiled worker |
+| `pnpm test` | Run tests |
+
+## API
+
+Create a notification (saved to DB, enqueued for delivery):
+
+```bash
+curl -sS -X POST "http://localhost:8080/api/v1/notifications" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Hello", "content": "World"}' | jq
+```
+
+Health check:
+
+```bash
+curl http://localhost:8080/health
+```
+
+## Architecture
+
+For layer responsibilities, request flow, error handling, logging, and DB conventions, see [ARCHITECTURE.md](./ARCHITECTURE.md).
