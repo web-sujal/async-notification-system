@@ -6,10 +6,8 @@ import { notificationWorker } from "./workers/notification.worker.js";
 async function bootstrap() {
   await connectDb();
 
-  console.log("Notification worker started");
-
   const shutdown = async () => {
-    console.log("Shutting down worker...");
+    console.log("⏹ Notification worker shutting down...");
     await notificationWorker.close();
     process.exit(0);
   };
@@ -19,6 +17,6 @@ async function bootstrap() {
 }
 
 bootstrap().catch((err) => {
-  console.error("Failed to start worker:", err);
+  console.error("Failed to start notification worker:", err);
   process.exit(1);
 });

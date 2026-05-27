@@ -5,9 +5,6 @@ import { startOutboxRelay } from "./relay/outbox.relay.js";
 
 async function bootstrap() {
   await connectDb();
-
-  console.log("Outbox relay started");
-
   await startOutboxRelay();
 }
 

@@ -11,7 +11,7 @@ export async function connectDb(): Promise<void> {
   try {
     const [{ current_database }] = await sql`SELECT current_database()`;
 
-    console.log("Connected to database: ", current_database);
+    console.log(`📦 Database connected: ${current_database}`);
     logger.info(`Connected to database: ${current_database}`);
   } catch (error) {
     logger.error("Failed to connect to database:", error);

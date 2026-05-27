@@ -16,14 +16,13 @@ export const startOutboxRelay = async () => {
   process.on("SIGINT", () => (isRunning = false));
   process.on("SIGTERM", () => (isRunning = false));
 
-  console.log("🚀 Starting outbox relay...");
+  console.log("📤 Outbox relay started — polling for pending events");
 
   while (isRunning) {
     try {
       const events = await outboxRepository.fetchPendingEvents(BATCH_SIZE);
 
       if (events.length === 0) {
-        console.log("💤 No pending events found, sleeping for 500ms");
         await sleep(IDLE_SLEEP_MS);
         continue;
       }
@@ -48,12 +47,17 @@ export const startOutboxRelay = async () => {
         publishedCount++;
       }
 
-      console.log(`✅ Successfully published ${publishedCount} events.`);
+      console.log(
+        `📤 Published ${publishedCount} event${publishedCount === 1 ? "" : "s"} to queue`,
+      );
     } catch (err) {
-      console.error("Error processing outbox events", err);
+      console.error(
+        "Outbox relay error — retrying in 3s:",
+        err instanceof Error ? err.message : err,
+      );
       await sleep(ERROR_SLEEP_MS);
     }
   }
 
-  console.log("Outbox relay stopped cleanly.");
+  console.log("📤 Outbox relay stopped");
 };
