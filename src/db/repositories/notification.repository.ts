@@ -9,6 +9,10 @@ import {
   toNotification,
 } from "../schemas/index.js";
 import { insertOutboxEvent } from "./outbox.repository.js";
+import {
+  NOTIFICATION_QUEUE_NAME,
+  SEND_NOTIFICATION_JOB_NAME,
+} from "../../utils/constants.js";
 
 const insertNotification = (
   tx: Sql | TransactionSql,
@@ -62,7 +66,6 @@ export const getById = async (id: string): Promise<Notification | null> => {
 
 export const createNotificationWithOutboxEvent = async (
   notification: CreateNotification,
-  outboxEvent: Omit<CreateOutboxEvent, "aggregateId">,
 ): Promise<Notification> => {
   return sql.begin(async (tx) => {
     // Create notification
@@ -70,8 +73,12 @@ export const createNotificationWithOutboxEvent = async (
 
     // Create outbox event
     await insertOutboxEvent(tx, {
-      ...outboxEvent,
       aggregateId: createdNotif.id,
+      aggregateType: NOTIFICATION_QUEUE_NAME,
+      eventType: SEND_NOTIFICATION_JOB_NAME,
+      payload: {
+        notficationId: createdNotif.id,
+      },
     });
 
     // Return notification
