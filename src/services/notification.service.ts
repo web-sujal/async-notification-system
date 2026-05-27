@@ -1,33 +1,29 @@
+import { StatusCodes } from "http-status-codes";
+
+import logger from "../config/logger.js";
 import { notificationRepository } from "../db/repositories/index.js";
 import { CreateNotification } from "../db/schemas/index.js";
-import { notificationQueue } from "../queues/index.js";
-import {
-  DEFAULT_NOTIFICATION_RETRY_ATTEMPTS,
-  SEND_NOTIFICATION_JOB_NAME,
-} from "../utils/constants.js";
+import { ApiError } from "../utils/apiError.js";
 
 export const createNotification = async (notification: CreateNotification) => {
-  const notif = await notificationRepository.create(notification);
+  const notif =
+    await notificationRepository.createNotificationWithOutboxEvent(
+      notification,
+    );
 
-  await notificationQueue.add(
-    SEND_NOTIFICATION_JOB_NAME,
-    {
-      notificationId: notif.id,
-    },
-    {
-      attempts: DEFAULT_NOTIFICATION_RETRY_ATTEMPTS,
-      backoff: {
-        type: "exponential",
-        delay: 2000,
-      },
-      jobId: notif.id,
-    },
-  );
+  logger.info(`Notification created: ${notif.id}`);
 
   return notif;
 };
 
 export const markNotificationAsDelivered = async (notificationId: string) => {
-  const res = await notificationRepository.markDelivered(notificationId);
-  return res;
+  const notif = await notificationRepository.markDelivered(notificationId);
+
+  if (!notif) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "Notification not found");
+  }
+
+  logger.info(`Notification delivered: ${notificationId}`);
+
+  return notif;
 };

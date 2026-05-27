@@ -44,7 +44,6 @@ app.use("/admin/queues", serverAdapter.getRouter());
 
 app.get("/health", (_req, res) => {
   logger.info("health check");
-  console.log("process.cwd()", process.cwd());
   return sendData(res, { status: "ok", message: "Server is running" });
 });
 
@@ -61,12 +60,15 @@ async function bootstrap() {
   await connectDb();
 
   app.listen(config.server.port, () => {
-    console.log(`🚀 Server running on http://localhost:${config.server.port}`);
+    console.log(
+      `🚀 API server listening on http://localhost:${config.server.port}`,
+    );
     logger.info(`Server running on http://localhost:${config.server.port}`);
   });
 }
 
 bootstrap().catch((err) => {
-  console.error("Failed to start server:", err);
+  console.error("Failed to start API server:", err);
+  logger.error("Failed to start API server:", err);
   process.exit(1);
 });
