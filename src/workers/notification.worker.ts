@@ -2,6 +2,7 @@ import { Job, Worker } from "bullmq";
 import { StatusCodes } from "http-status-codes";
 
 import { config } from "../config/config.js";
+import logger from "../config/logger.js";
 import { redisConnection } from "../config/redis.js";
 import { notificationDlq } from "../queues/notification.dlq.queue.js";
 import { notificationService } from "../services/index.js";
@@ -47,11 +48,15 @@ notificationWorker.on("ready", () => {
 
 notificationWorker.on("completed", (job) => {
   console.log(`✅ Job ${job.id}: delivery complete`);
+  logger.info(
+    `Job ${job.id} completed for notification ${job.data.notificationId}`,
+  );
 });
 
 notificationWorker.on("failed", async (job, err) => {
   if (!job) {
     console.error(`❌ Job failed: ${err.message}`);
+    logger.error("Job failed with no job context:", err);
     return;
   }
 
@@ -78,10 +83,16 @@ notificationWorker.on("failed", async (job, err) => {
     console.log(
       `⚠ Job ${job.id}: moved to DLQ after ${currentAttempt} failed attempt(s)`,
     );
+    logger.warn(
+      `Job ${job.id} moved to DLQ after ${currentAttempt} failed attempt(s): ${err.message}`,
+    );
     return;
   }
 
   console.error(
     `❌ Job ${job.id}: attempt ${currentAttempt}/${maxAttempts} failed — ${err.message}`,
+  );
+  logger.error(
+    `Job ${job.id} attempt ${currentAttempt}/${maxAttempts} failed: ${err.message}`,
   );
 });

@@ -75,6 +75,7 @@ function getLogPath(): string {
 
 const fileLineFormat = format((info) => {
   info.logpath = getLogPath();
+  info.service = config.logger.serviceName;
   return info;
 });
 
@@ -90,7 +91,7 @@ const lineFormat = format.printf((info) => {
       ? info.message
       : JSON.stringify(info.message));
 
-  return `${timestamp} [${info.logpath}] ${info.level.toUpperCase()}:\t${message}`;
+  return `${timestamp} [${info.service}] [${info.logpath}] ${info.level.toUpperCase()}:\t${message}`;
 });
 
 const logFormat = format.combine(

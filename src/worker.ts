@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { connectDb } from "./config/db.js";
+import logger from "./config/logger.js";
 import { notificationWorker } from "./workers/notification.worker.js";
 
 async function bootstrap() {
@@ -18,5 +19,6 @@ async function bootstrap() {
 
 bootstrap().catch((err) => {
   console.error("Failed to start notification worker:", err);
+  logger.error("Failed to start notification worker:", err);
   process.exit(1);
 });
