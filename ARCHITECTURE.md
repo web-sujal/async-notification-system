@@ -30,9 +30,11 @@ src/
 ├── middlewares/      # global error handler
 ├── routes/v1/        # route wiring + middleware
 ├── services/         # business logic
-├── queues/           # BullMQ queue (producer)
-├── workers/          # BullMQ worker (consumer)
-├── worker.ts         # worker process entry point
+├── queues/           # BullMQ queues (main + DLQ) + Bull Board
+│   ├── notification.queue.ts
+│   └── notification.dlq.queue.ts
+├── workers/          # BullMQ worker processor
+├── worker.ts         # worker process entry point (separate from API)
 └── utils/            # ApiError, asyncHandler, validate, sendData
 
 migrations/           # numbered .sql migration files
@@ -71,15 +73,88 @@ sequenceDiagram
 ### Example: `POST /api/v1/notifications`
 
 ```
-index.ts          app.use("/api/v1", v1Router)
-routes/v1/        v1Router.use("/notifications", notificationRouter)
+index.ts            app.use("/api/v1", v1Router)
+routes/v1/          v1Router.use("/notifications", notificationRouter)
 notification.route  validate(createNotificationSchema)
                     asyncHandler(notificationController.createNotification)
-controller        notificationService.createNotification(req.body)
-service           notificationRepository.create(data)
-repository        INSERT ... RETURNING *  →  toNotification(row)
-controller        sendData(res, notification, 201)
+controller          notificationService.createNotification(req.body)
+service             notificationRepository.create(data)
+                    notificationQueue.add({ notificationId }, retries + jobId)
+controller          sendData(res, notification, 201)   ← 201 before delivery finishes
+
+worker.ts           separate process (pnpm dev:worker)
+notification.worker processJob → markNotificationAsDelivered
+repository          UPDATE ... SET is_delivered = TRUE
 ```
+
+## Async delivery (BullMQ)
+
+The API and worker run as **separate processes**:
+
+| Process | Entry | Role |
+| ------- | ----- | ---- |
+| API | `src/index.ts` (`pnpm dev`) | HTTP, enqueue jobs |
+| Worker | `src/worker.ts` (`pnpm dev:worker`) | Consume jobs, mark delivered |
+
+### Flow
+
+```mermaid
+sequenceDiagram
+  participant API
+  participant Postgres
+  participant Redis
+  participant Worker
+
+  API->>Postgres: INSERT notification (is_delivered=false)
+  API->>Redis: queue.add(notificationId)
+  API-->>Client: 201 { data: notification }
+
+  Worker->>Redis: pick job from notification queue
+  Worker->>Postgres: markDelivered(notificationId)
+  Worker-->>Redis: job completed (or retry / DLQ)
+```
+
+### Queues
+
+| Queue | Redis name | File | Purpose |
+| ----- | ---------- | ---- | ------- |
+| Main | `notification` | `queues/notification.queue.ts` | Jobs waiting to be delivered |
+| DLQ | `notification-dlq` | `queues/notification.dlq.queue.ts` | Jobs that exhausted all retries |
+
+Constants live in `src/utils/constants.ts` (`NOTIFICATION_QUEUE_NAME`, `SEND_NOTIFICATION_JOB_NAME`, etc.).
+
+Jobs are enqueued in the service with:
+
+- `attempts: 3` and exponential backoff (`2s` base delay)
+- `jobId: notification.id` (dedupes enqueue per notification UUID)
+
+**Job IDs vs payload:** BullMQ `job.id` is an auto-increment queue counter (`"1"`, `"2"`, …). Business identity is `job.data.notificationId`.
+
+### Worker processor
+
+`src/workers/notification.worker.ts`:
+
+1. Optionally throw (~50% chance) when `ENABLE_FAILURE_MODE` is on — triggers BullMQ retry/backoff
+2. Call `notificationService.markNotificationAsDelivered(notificationId)`
+3. Optionally sleep (`ENABLE_DELAY_MODE` + `DELAY_MODE_DELAY`) **after** a successful DB update — useful for watching in-flight jobs in Bull Board
+4. On `failed` after max attempts → `failed` handler copies job metadata into the DLQ queue
+
+Import sibling queue files directly — **never** `import from "./index.js"` inside a module that `index.ts` re-exports (circular dependency breaks the worker silently).
+
+### Dead letter queue (DLQ)
+
+When a job fails all retry attempts, the worker's `failed` handler pushes a new job to `notification-dlq` with:
+
+- `originalJob` — id, name, data, opts from the failed job
+- `failure` — reason, stack trace, attempts, timestamp
+
+The DLQ is a parking lot for inspection/replay — no DLQ worker by default. Failed jobs also remain visible on the main queue's **Failed** tab in Bull Board until cleaned up.
+
+### Bull Board (dev)
+
+Mounted at `/admin/queues` from `notification.queue.ts`. Shows both `notification` and `notification-dlq`. Read-only visibility into Redis job state — data is stored under `bull:notification:*` and `bull:notification-dlq:*`.
+
+Do not expose in production without auth.
 
 ## Layer responsibilities
 
@@ -267,6 +342,15 @@ Environment variables are validated at startup in `src/config/config.ts` with Zo
 | `LOG_LEVEL`         | `warn`        | Min level in production (`debug` forced in dev)   |
 | `DATABASE_URL`      | required      | Postgres connection string                        |
 | `DATABASE_MAX_POOL` | `20`          | Max pool connections                              |
+| `REDIS_URL`         | required      | Redis connection string (BullMQ)                  |
+| `ENABLE_FAILURE_MODE` | `false`     | Worker randomly throws (~50%) to test retries/DLQ |
+| `ENABLE_DELAY_MODE` | `false`       | Worker sleeps before completing job               |
+| `DELAY_MODE_DELAY`  | `500`         | Delay in ms when delay mode is on                 |
+
+Dev/test flags (`config.flags`):
+
+- **`isFailureModeEnabled`** — simulates delivery failures for retry/DLQ testing
+- **`isDelayModeEnabled`** + **`delayModeDelay`** — slows worker to observe in-flight jobs in Bull Board
 
 Invalid env vars print to stderr and exit before the server starts.
 
@@ -293,16 +377,15 @@ notificationRepository.create(data);
 
 ## Scripts
 
-w
 | Command | Description |
 | ------- | ----------- |
-| `pnpm dev` | Dev server with hot reload (`tsx --watch`) |
-| `pnpm build` | Compile to `dist/` |
-| `pnpm start` | Run compiled app |
+| `pnpm dev` | API with hot reload |
+| `pnpm dev:worker` | Worker with hot reload (required for delivery) |
 | `pnpm migration:run` | Apply pending SQL migrations |
-| `pnpm dev:worker` | start bullmq worker with hot reload |
-| `pnpm worker` | start bullmq worker |
-| `pnpm test` | Run Vitest tests |
+| `pnpm build` | Compile to `dist/` |
+| `pnpm start` | Run compiled API |
+| `pnpm worker` | Run compiled worker |
+| `pnpm test` | Run tests |
 | `pnpm lint` | ESLint |
 | `pnpm format` | Prettier |
 
@@ -310,7 +393,8 @@ w
 
 1. **Migration** — `migrations/00N_description.sql`
 2. **Schema** — Zod schema + row type + mapper in `src/db/schemas/`
-3. **Repository** — SQL in `src/db/repositories/`
+3. **Repository** — SQL in `src/db/repositories/` (`null` when row not found)
 4. **Service** — business logic + logging in `src/services/`
 5. **Controller** — req/res handler in `src/controllers/`
 6. **Route** — wire validate + asyncHandler in `src/routes/v1/`
+7. **Async work** — enqueue in service, process in worker (keep API/worker separate)
