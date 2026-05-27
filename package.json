@@ -7,9 +7,11 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
+    "start:relay": "node dist/relay.js",
     "dev": "tsx --watch src/index.ts",
     "dev:worker": "tsx --watch src/worker.ts",
-    "worker": "node dist/worker.js",
+    "dev:relay": "tsx --watch src/relay.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
     "test": "NODE_ENV=test vitest run",

@@ -1,7 +1,12 @@
 import type { Sql, TransactionSql } from "postgres";
 
 import { sql } from "../../config/db.js";
-import { CreateOutboxEvent } from "../schemas/outbox.schema.js";
+import {
+  CreateOutboxEvent,
+  OutboxEvent,
+  OutboxEventRow,
+  toOutboxEvent,
+} from "../schemas/outbox.schema.js";
 
 export const insertOutboxEvent = (
   tx: Sql | TransactionSql,
@@ -21,3 +26,32 @@ export const insertOutboxEvent = (
       ${sql.json(data.payload)}
     );
   `;
+
+export const getOutboxEvents = async (
+  batchSize = 20,
+): Promise<OutboxEvent[]> => {
+  const outboxEvents = await sql.begin<OutboxEventRow[]>((tx) => {
+    return tx`
+      SELECT * FROM outbox_events
+      WHERE processed_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT ${batchSize}
+      FOR UPDATE SKIP LOCKED;`;
+  });
+
+  if (outboxEvents.length === 0) {
+    return [];
+  }
+
+  return outboxEvents.map(toOutboxEvent);
+};
+
+export const markProcessed = async (id: string) => {
+  await sql`
+    UPDATE outbox_events
+    SET processed_at = now()
+    WHERE id = ${id}
+  `;
+
+  return;
+};
