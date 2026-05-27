@@ -10,6 +10,7 @@ import { config } from "./config/config.js";
 import { connectDb } from "./config/db.js";
 import logger from "./config/logger.js";
 import { errorHandler } from "./middlewares/error.middleware.js";
+import { serverAdapter } from "./queues/notification.queue.js";
 import { v1Router } from "./routes/v1/index.js";
 import { sendData } from "./utils/apiSuccess.js";
 
@@ -38,6 +39,8 @@ app.use(
 );
 
 app.use(express.json());
+
+app.use("/admin/queues", serverAdapter.getRouter());
 
 app.get("/health", (_req, res) => {
   logger.info("health check");
