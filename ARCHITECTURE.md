@@ -13,7 +13,7 @@ Async Notification System — an Express + TypeScript API backed by PostgreSQL a
 | Language   | TypeScript                                                         |
 | Database   | PostgreSQL via [postgres.js](https://github.com/porsager/postgres) |
 | Validation | Zod                                                                |
-| Logging    | Winston (file-only) + Morgan (HTTP, terminal)                      |
+| Logging    | Winston (files) + Morgan + `console.*` (terminal)                  |
 | Queue      | BullMQ + Redis                                                     |
 | Tests      | Vitest + Supertest                                                 |
 
@@ -21,11 +21,11 @@ Async Notification System — an Express + TypeScript API backed by PostgreSQL a
 
 ```
 src/
-├── config/           # env validation, DB pool, logger
+├── config/           # env validation, DB pool, Redis, logger
 ├── controllers/      # HTTP handlers (req/res only)
 ├── db/
 │   ├── migrate.ts    # migration runner
-│   ├── repositories/ # SQL data access
+│   ├── repositories/ # SQL data access (notification + outbox)
 │   └── schemas/      # Zod schemas, domain types, row mappers
 ├── middlewares/      # global error handler
 ├── routes/v1/        # route wiring + middleware
@@ -33,8 +33,11 @@ src/
 ├── queues/           # BullMQ queues (main + DLQ) + Bull Board
 │   ├── notification.queue.ts
 │   └── notification.dlq.queue.ts
+├── relay/            # outbox relay (poll DB → enqueue Redis)
+│   └── outbox.relay.ts
+├── relay.ts          # relay process entry point
 ├── workers/          # BullMQ worker processor
-├── worker.ts         # worker process entry point (separate from API)
+├── worker.ts         # worker process entry point
 └── utils/            # ApiError, asyncHandler, validate, sendData
 
 migrations/           # numbered .sql migration files
@@ -78,41 +81,88 @@ routes/v1/          v1Router.use("/notifications", notificationRouter)
 notification.route  validate(createNotificationSchema)
                     asyncHandler(notificationController.createNotification)
 controller          notificationService.createNotification(req.body)
-service             notificationRepository.create(data)
-                    notificationQueue.add({ notificationId }, retries + jobId)
+service             notificationRepository.createNotificationWithOutboxEvent(data)
+repository          sql.begin: INSERT notification + INSERT outbox_events (atomic)
+service             logger.info("Notification created: …")
 controller          sendData(res, notification, 201)   ← 201 before delivery finishes
 
+relay.ts            separate process (pnpm dev:relay)
+outbox.relay        fetchPendingEvents → notificationQueue.add → markProcessed
 worker.ts           separate process (pnpm dev:worker)
 notification.worker processJob → markNotificationAsDelivered
-repository          UPDATE ... SET is_delivered = TRUE
+repository          UPDATE … SET is_delivered = TRUE
 ```
 
-## Async delivery (BullMQ)
+## Async delivery (transactional outbox + BullMQ)
 
-The API and worker run as **separate processes**:
+Delivery runs across **three separate processes**. The API never talks to Redis directly — it writes intent to Postgres; the relay publishes to BullMQ.
 
-| Process | Entry | Role |
-| ------- | ----- | ---- |
-| API | `src/index.ts` (`pnpm dev`) | HTTP, enqueue jobs |
-| Worker | `src/worker.ts` (`pnpm dev:worker`) | Consume jobs, mark delivered |
+| Process | Entry | Script | Role |
+| ------- | ----- | ------ | ---- |
+| API | `src/index.ts` | `pnpm dev` | HTTP, atomic notification + outbox write |
+| Relay | `src/relay.ts` | `pnpm dev:relay` | Poll outbox, enqueue jobs to Redis |
+| Worker | `src/worker.ts` | `pnpm dev:worker` | Consume jobs, mark delivered |
 
-### Flow
+### End-to-end flow
 
 ```mermaid
 sequenceDiagram
+  participant Client
   participant API
   participant Postgres
+  participant Relay
   participant Redis
   participant Worker
 
-  API->>Postgres: INSERT notification (is_delivered=false)
-  API->>Redis: queue.add(notificationId)
+  Client->>API: POST /notifications
+  API->>Postgres: BEGIN — INSERT notification + outbox_events
+  API->>Postgres: COMMIT
   API-->>Client: 201 { data: notification }
+
+  loop poll
+    Relay->>Postgres: SELECT unprocessed outbox rows
+    Relay->>Redis: queue.add({ notificationId })
+    Relay->>Postgres: UPDATE processed_at
+  end
 
   Worker->>Redis: pick job from notification queue
   Worker->>Postgres: markDelivered(notificationId)
   Worker-->>Redis: job completed (or retry / DLQ)
 ```
+
+### Transactional outbox
+
+**Table:** `outbox_events` (migrations `003`, `004`)
+
+| Column | Purpose |
+| ------ | ------- |
+| `aggregate_id` | Business ID (notification UUID) |
+| `aggregate_type` | Domain type (`notification`) |
+| `event_type` | Handler routing (`send-notification`) |
+| `payload` | JSONB job data (`{ notificationId }`) |
+| `processed_at` | `NULL` until relay publishes; partial index on unprocessed rows |
+
+Migration `004` drops the FK to `notifications` so the outbox stays generic, and adds `idx_outbox_events_unprocessed` for relay polling.
+
+**Write path** — `notificationRepository.createNotificationWithOutboxEvent()`:
+
+1. `sql.begin` — single transaction
+2. `insertNotification(tx, …)` — shared helper accepting `Sql | TransactionSql`
+3. `insertOutboxEvent(tx, …)` — from `outbox.repository.ts`; use `sql.json(payload)` for JSONB
+4. Return mapped `Notification`
+
+The service does **not** call `notificationQueue.add()`.
+
+**Relay path** — `outboxRepository.fetchPendingEvents()` → publish → `markProcessed()`:
+
+- Fetch and publish happen **outside** any DB transaction
+- Redis/BullMQ is never called inside `sql.begin` (long locks + partial-failure risk)
+- **At-least-once delivery** — if relay crashes after enqueue but before mark, the row is retried; `jobId: aggregateId` dedupes duplicate enqueues
+
+**Relay enqueue opts** (same as before, now in `outbox.relay.ts`):
+
+- `attempts: 3` and exponential backoff (`2s` base delay)
+- `jobId: event.aggregateId` (notification UUID)
 
 ### Queues
 
@@ -122,11 +172,6 @@ sequenceDiagram
 | DLQ | `notification-dlq` | `queues/notification.dlq.queue.ts` | Jobs that exhausted all retries |
 
 Constants live in `src/utils/constants.ts` (`NOTIFICATION_QUEUE_NAME`, `SEND_NOTIFICATION_JOB_NAME`, etc.).
-
-Jobs are enqueued in the service with:
-
-- `attempts: 3` and exponential backoff (`2s` base delay)
-- `jobId: notification.id` (dedupes enqueue per notification UUID)
 
 **Job IDs vs payload:** BullMQ `job.id` is an auto-increment queue counter (`"1"`, `"2"`, …). Business identity is `job.data.notificationId`.
 
@@ -140,6 +185,16 @@ Jobs are enqueued in the service with:
 4. On `failed` after max attempts → `failed` handler copies job metadata into the DLQ queue
 
 Import sibling queue files directly — **never** `import from "./index.js"` inside a module that `index.ts` re-exports (circular dependency breaks the worker silently).
+
+### Outbox repository
+
+`src/db/repositories/outbox.repository.ts`:
+
+| Method | Purpose |
+| ------ | ------- |
+| `insertOutboxEvent(tx, data)` | Insert row inside an existing transaction |
+| `fetchPendingEvents(batchSize)` | `SELECT` unprocessed rows ordered by `created_at` |
+| `markProcessed(id)` | Set `processed_at` after successful enqueue |
 
 ### Dead letter queue (DLQ)
 
@@ -184,12 +239,14 @@ Do not expose in production without auth.
 - Short method names scoped by namespace: `notificationRepository.create`.
 - Return domain types via mappers — never leak snake_case rows upward.
 - Let DB errors bubble; translate to `ApiError` in the service only when needed.
+- **Transactions:** pass `Sql | TransactionSql` to helpers used inside `sql.begin`; use `sql.json()` for JSONB columns.
+- **Outbox writes** live in `outbox.repository.ts`; **atomic notification + outbox** is orchestrated in `notificationRepository.createNotificationWithOutboxEvent()`.
 
 ### Schemas (`src/db/schemas/`)
 
-- **Zod schemas** — app/API shape (camelCase): `notificationSchema`, `createNotificationSchema`.
-- **Row types** — DB shape (snake_case): `NotificationRow`.
-- **Mappers** — `toNotification(row)` maps row → domain and validates via `notificationSchema.parse()`.
+- **Zod schemas** — app/API shape (camelCase): `notificationSchema`, `createNotificationSchema`, `outboxEventSchema`.
+- **Row types** — DB shape (snake_case): `NotificationRow`, `OutboxEventRow`.
+- **Mappers** — `toNotification(row)`, `toOutboxEvent(row)` map row → domain and validate via Zod.
 
 ## API response format
 
@@ -253,7 +310,7 @@ Validation middleware (`validate`) parses `req.body` with Zod and throws `ApiErr
 - Pool created in `src/config/db.ts` via `postgres(url, { max })`.
 - `postgres()` is lazy — no TCP until the first query.
 - `connectDb()` runs `SELECT current_database()` at startup to fail fast.
-- Called from `bootstrap()` before `app.listen()`.
+- Called from `bootstrap()` in the API, relay, and worker entry points.
 
 ### Naming convention
 
@@ -272,6 +329,8 @@ SQL files in `migrations/` follow `{number}_{description}.sql`:
 ```
 001_create_notiiciation.sql
 002_add_is_delivered_to_notifications.sql
+003_create_outbox_events.sql
+004_fix_outbox_tight_coupling.sql
 ```
 
 Run with:
@@ -292,15 +351,19 @@ Write plain SQL — no trailing commas, use `(` not `{` for table definitions. E
 
 ## Logging
 
-Two separate channels by design:
+Three channels by design — terminal for live ops, files for audit:
 
-| Channel               | Output     | Used for                                 |
-| --------------------- | ---------- | ---------------------------------------- |
-| **Morgan**            | Terminal   | HTTP access logs                         |
-| **console.log/error** | Terminal   | Startup messages, fatal bootstrap errors |
-| **Winston logger**    | Files only | App events, errors, audit trail          |
+| Channel | Output | Used for |
+| ------- | ------ | -------- |
+| **Morgan** | Terminal | HTTP access logs (API only) |
+| **`console.log` / `console.error`** | Terminal / container stdout | Process lifecycle, job progress, batch published — human-readable, easy to scan |
+| **Winston `logger.*`** | Files only | Business events, errors, audit trail |
 
-Log files (rotated daily via symlinks):
+Do **not** duplicate every console line to logger. Console = operational; logger = persistence.
+
+### Log files
+
+Rotated daily via symlinks:
 
 ```
 logs/
@@ -309,25 +372,29 @@ logs/
 └── error.log     →  errors only
 ```
 
-Format:
+### Log format
 
 ```
-2026-05-26T17:44:09.957Z [src/db/migrate.ts:8] INFO:  Starting database migrations...
-1779720267309 [src/utils/dbUtils.ts:51] DEBUG:  MongoClient connecting
+2026-05-26T17:44:09.957Z [worker] [src/workers/notification.worker.ts:86] ERROR: Job 3 attempt 2/3 failed: …
 ```
 
-- ISO timestamps for info/warn/error.
-- Epoch ms for debug.
-- `[file:line]` from stack trace.
+- `[service]` — from `SERVICE_NAME` env (`api`, `worker`, `relay`); set in `package.json` scripts
+- `[file:line]` — caller location from stack trace
+- ISO timestamps for info/warn/error; epoch ms for debug
+
+Filter shared logs: `grep '\[relay\]' logs/combined.log`
 
 ### Where to log
 
-| Layer              | Log?                                              |
-| ------------------ | ------------------------------------------------- |
-| `error.middleware` | Yes — every error                                 |
-| Service            | Yes — business events (created, delivered, retry) |
-| Repository         | No — let errors bubble                            |
-| Controller         | Avoid — keep HTTP layer thin                      |
+| Layer | `console.*` | `logger.*` |
+| ----- | ----------- | ---------- |
+| API bootstrap | Server listening, fatal startup | `logger.error` on bootstrap failure |
+| Relay | Polling started, batch published, stopped | Batch size (`info`), relay errors (`error`) |
+| Worker | Job progress, ready, shutdown | Job completed (`info`), retries (`error`), DLQ (`warn`) |
+| Service | No | Created, delivered (`info`) |
+| `error.middleware` | No | Every error (`error`) |
+| Repository | No | No — let errors bubble |
+| Controller | No | No — keep HTTP layer thin |
 
 ## Configuration
 
@@ -340,11 +407,12 @@ Environment variables are validated at startup in `src/config/config.ts` with Zo
 | `CORS_ORIGINS`      | (empty)       | Comma-separated origins; empty = allow all in dev |
 | `LOG_DIR`           | `logs`        | Log file directory                                |
 | `LOG_LEVEL`         | `warn`        | Min level in production (`debug` forced in dev)   |
+| `SERVICE_NAME`      | `api`         | Log prefix: `api`, `worker`, or `relay`           |
 | `DATABASE_URL`      | required      | Postgres connection string                        |
 | `DATABASE_MAX_POOL` | `20`          | Max pool connections                              |
 | `REDIS_URL`         | required      | Redis connection string (BullMQ)                  |
 | `ENABLE_FAILURE_MODE` | `false`     | Worker randomly throws (~50%) to test retries/DLQ |
-| `ENABLE_DELAY_MODE` | `false`       | Worker sleeps before completing job               |
+| `ENABLE_DELAY_MODE` | `false`       | Worker sleeps after DB update before completing   |
 | `DELAY_MODE_DELAY`  | `500`         | Delay in ms when delay mode is on                 |
 
 Dev/test flags (`config.flags`):
@@ -379,12 +447,14 @@ notificationRepository.create(data);
 
 | Command | Description |
 | ------- | ----------- |
-| `pnpm dev` | API with hot reload |
-| `pnpm dev:worker` | Worker with hot reload (required for delivery) |
+| `pnpm dev` | API with hot reload (`SERVICE_NAME=api`) |
+| `pnpm dev:relay` | Outbox relay with hot reload (`SERVICE_NAME=relay`) |
+| `pnpm dev:worker` | Worker with hot reload (`SERVICE_NAME=worker`) |
 | `pnpm migration:run` | Apply pending SQL migrations |
 | `pnpm build` | Compile to `dist/` |
 | `pnpm start` | Run compiled API |
-| `pnpm worker` | Run compiled worker |
+| `pnpm start:relay` | Run compiled relay |
+| `pnpm start:worker` | Run compiled worker |
 | `pnpm test` | Run tests |
 | `pnpm lint` | ESLint |
 | `pnpm format` | Prettier |
@@ -394,7 +464,7 @@ notificationRepository.create(data);
 1. **Migration** — `migrations/00N_description.sql`
 2. **Schema** — Zod schema + row type + mapper in `src/db/schemas/`
 3. **Repository** — SQL in `src/db/repositories/` (`null` when row not found)
-4. **Service** — business logic + logging in `src/services/`
+4. **Service** — business logic + `logger.info` for business events
 5. **Controller** — req/res handler in `src/controllers/`
 6. **Route** — wire validate + asyncHandler in `src/routes/v1/`
-7. **Async work** — enqueue in service, process in worker (keep API/worker separate)
+7. **Async work** — outbox row in the same DB transaction as the write; relay enqueues; worker processes (keep all three processes separate)
