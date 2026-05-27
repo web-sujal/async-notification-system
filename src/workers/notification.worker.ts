@@ -18,7 +18,6 @@ const processJob = async (job: Job<{ notificationId: string }>) => {
   }
 
   const { notificationId } = job.data;
-  console.log("🚀 ~ processJob ~ job:", job.opts);
 
   console.log(`⏩ Processing notification ${notificationId}`);
 
