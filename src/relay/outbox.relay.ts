@@ -1,4 +1,3 @@
-import logger from "../config/logger.js";
 import { outboxRepository } from "../db/repositories/index.js";
 import { notificationQueue } from "../queues/index.js";
 import {
@@ -13,48 +12,47 @@ export const startOutboxRelay = async () => {
   process.on("SIGINT", () => (isRunning = false));
   process.on("SIGTERM", () => (isRunning = false));
 
+  console.log("🚀 Starting outbox relay...");
+
   while (isRunning) {
     try {
-      const pendingEvents = await outboxRepository.getOutboxEvents();
+      const BATCH_SIZE = 20;
+
+      const processedCount = await outboxRepository.processOutboxBatch(
+        BATCH_SIZE,
+        async (event) => {
+          // Add job to notification queue
+          await notificationQueue.add(
+            SEND_NOTIFICATION_JOB_NAME,
+            event.payload,
+            {
+              jobId: event.aggregateId,
+              attempts: DEFAULT_NOTIFICATION_RETRY_ATTEMPTS,
+              backoff: {
+                type: "exponential",
+                delay: 2000,
+              },
+            },
+          );
+        },
+      );
 
       // If nothing to process, sleep to prevent CPU/DB thrashing
-      if (pendingEvents.length === 0) {
-        logger.info("No pending events found, sleeping for 500ms");
-
+      if (processedCount === 0) {
+        console.log("💤 No pending events found, sleeping for 500ms");
         await sleep(500);
-        continue;
-      }
-
-      for (const event of pendingEvents) {
-        try {
-          const { payload } = event;
-
-          // Add job to notification queue
-          await notificationQueue.add(SEND_NOTIFICATION_JOB_NAME, payload, {
-            jobId: event.aggregateId,
-            attempts: DEFAULT_NOTIFICATION_RETRY_ATTEMPTS,
-            backoff: {
-              type: "exponential",
-              delay: 2000,
-            },
-          });
-
-          // Mark outbox event as processed
-          await outboxRepository.markProcessed(event.id);
-
-          console.log(`Job ${event.aggregateId} added to notification queue`);
-          console.log(`Outbox event ${event.id} marked as processed`);
-        } catch (err) {
-          logger.error(`Failed to process outbox event ${event.id}`, err);
-        }
+      } else {
+        console.log(
+          `✅ Successfully published batch of ${processedCount} events.`,
+        );
       }
     } catch (err) {
-      logger.error("Error processing outbox events", err);
+      console.error("Error processing outbox events", err);
 
-      // Sleep for 500ms to avoid busy-waiting
-      await sleep(500);
+      // Sleep for 3 seconds to prevent DB spam
+      await sleep(3000);
     }
   }
 
-  logger.info("Outbox relay stopped cleanly.");
+  console.log("Outbox relay stopped cleanly.");
 };
