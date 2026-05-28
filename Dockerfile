@@ -18,12 +18,12 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-RUN corepack enable 
-
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 8080
+
+USER node
 
 CMD ["node", "dist/src/index.js"]
