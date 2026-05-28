@@ -9,6 +9,7 @@ x-base-app: &base-app
     - ans-net
   volumes:
     - ans-logs:/app/logs
+  restart: unless-stopped
 
 services:
   api:
@@ -70,6 +71,7 @@ services:
 
   redis:
     image: redis:8
+    restart: unless-stopped
     volumes:
       - ans-redis-data:/data
     networks:
@@ -85,6 +87,7 @@ services:
     image: postgres:16
     env_file:
       - .env.docker
+    restart: unless-stopped
     volumes:
       - ans-db-data:/var/lib/postgresql/data
     networks:
