@@ -11,8 +11,6 @@ COPY . .
 
 RUN CI=true pnpm run build
 
-RUN pnpm prune --prod
-
 # Production stage
 FROM node:22-alpine AS runner
 
@@ -22,6 +20,8 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/migrations ./migrations
+
+RUN pnpm prune --prod
 
 # Install curl for healthcheck
 RUN apk add --no-cache curl

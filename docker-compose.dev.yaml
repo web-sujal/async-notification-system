@@ -1,0 +1,52 @@
+# Dev override: builder target + tsx watch + compose watch sync
+x-base-app: &base-app
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: builder
+  env_file:
+    - .env.docker.development
+  develop:
+    watch:
+      - path: ./package.json
+        action: rebuild
+      - path: ./pnpm-lock.yaml
+        action: rebuild
+      - path: ./src
+        action: sync+restart
+        target: /app/src
+      - path: ./migrations
+        action: sync+restart
+        target: /app/migrations
+
+services:
+  api:
+    <<: *base-app
+    command: ["pnpm", "dev"]
+    healthcheck:
+      disable: true
+
+  worker:
+    <<: *base-app
+    command: ["pnpm", "dev:worker"]
+
+  relay:
+    <<: *base-app
+    command: ["pnpm", "dev:relay"]
+
+  migrate:
+    <<: *base-app
+    restart: "no"
+    command: ["pnpm", "migration:run"]
+
+  redis:
+    env_file:
+      - .env.docker.development
+    ports:
+      - "6379:6379"
+
+  db:
+    env_file:
+      - .env.docker.development
+    ports:
+      - "5432:5432"
