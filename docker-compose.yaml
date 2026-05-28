@@ -1,18 +1,22 @@
+# Shared app image: build once, run as api / worker / relay / migrate
+x-base-app: &base-app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env.docker
+  networks:
+    - ans-net
+  volumes:
+    - ans-logs:/app/logs
+
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *base-app
     ports:
       - "8080:8080"
-    env_file:
-      - .env.docker
     environment:
-      - SERVICE_NAME=api
-    volumes:
-      - ans-logs:/app/logs
-    networks:
-      - ans-net
+      SERVICE_NAME: api
     depends_on:
       db:
         condition: service_healthy
@@ -29,18 +33,10 @@ services:
       start_period: 30s
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    env_file:
-      - .env.docker
-    environment:
-      - SERVICE_NAME=worker
-    volumes:
-      - ans-logs:/app/logs
-    networks:
-      - ans-net
+    <<: *base-app
     command: ["node", "dist/src/worker.js"]
+    environment:
+      SERVICE_NAME: worker
     depends_on:
       db:
         condition: service_healthy
@@ -50,18 +46,10 @@ services:
         condition: service_completed_successfully
 
   relay:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    env_file:
-      - .env.docker
-    environment:
-      - SERVICE_NAME=relay
-    volumes:
-      - ans-logs:/app/logs
-    networks:
-      - ans-net
+    <<: *base-app
     command: ["node", "dist/src/relay.js"]
+    environment:
+      SERVICE_NAME: relay
     depends_on:
       db:
         condition: service_healthy
@@ -71,18 +59,11 @@ services:
         condition: service_completed_successfully
 
   migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    env_file:
-      - .env.docker
-    environment:
-      - SERVICE_NAME=migrate
-    volumes:
-      - ans-logs:/app/logs
-    networks:
-      - ans-net
+    <<: *base-app
+    restart: "no"
     command: ["node", "dist/src/db/migrate.js"]
+    environment:
+      SERVICE_NAME: migrate
     depends_on:
       db:
         condition: service_healthy
@@ -109,8 +90,7 @@ services:
     networks:
       - ans-net
     healthcheck:
-      test:
-        ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 5s
       retries: 5
