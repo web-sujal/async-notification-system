@@ -8,7 +8,7 @@
     "noImplicitOverride": true,
 
     /* Paths */
-    "rootDir": "./src",
+    // "rootDir": "./src",
     "outDir": "./dist",
 
     /* Interop */
@@ -30,6 +30,6 @@
     /* Node ergonomics */
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
