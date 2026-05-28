@@ -1,0 +1,107 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 8080:8080
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=api
+    volumes:
+      - ans-logs:/app/logs
+    networks:
+      - ans-net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:8080/health > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=worker
+    volumes:
+      - ans-logs:/app/logs
+    networks:
+      - ans-net
+    command: ["node", "dist/src/worker.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=relay
+    volumes:
+      - ans-logs:/app/logs
+    networks:
+      - ans-net
+    command: ["node", "dist/src/relay.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:8
+    volumes:
+      - ans-redis-data:/data
+    networks:
+      - ans-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=async_notification_system
+    volumes:
+      - ans-db-data:/var/lib/postgresql/data
+    networks:
+      - ans-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d async_notification_system"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  ans-logs:
+    driver: local
+  ans-redis-data:
+    driver: local
+  ans-db-data:
+    driver: local
+
+networks:
+  ans-net:
+    driver: bridge

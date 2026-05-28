@@ -22,6 +22,9 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
+# Install curl for healthcheck
+RUN apk add --no-cache curl
+
 # FIX: Create the folder as root, then give it to the node user
 RUN mkdir /app/logs && chown node:node /app/logs
 
