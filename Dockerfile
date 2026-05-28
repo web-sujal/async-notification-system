@@ -22,6 +22,9 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
+# FIX: Create the folder as root, then give it to the node user
+RUN mkdir /app/logs && chown node:node /app/logs
+
 EXPOSE 8080
 
 USER node
