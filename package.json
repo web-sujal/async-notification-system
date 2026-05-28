@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "test": "NODE_ENV=test vitest run",
     "test:watch": "NODE_ENV=test vitest",
-    "migration:run": "tsx src/db/migrate.ts"
+    "migration:run": "SERVICE_NAME=migrate tsx src/db/migrate.ts"
   },
   "keywords": [
     "express",

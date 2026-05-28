@@ -4,9 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - 8080:8080
+      - "8080:8080"
     env_file:
-      - .env
+      - .env.docker
     environment:
       - SERVICE_NAME=api
     volumes:
@@ -33,7 +33,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.docker
     environment:
       - SERVICE_NAME=worker
     volumes:
@@ -54,7 +54,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.docker
     environment:
       - SERVICE_NAME=relay
     volumes:
@@ -75,7 +75,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.docker
     environment:
       - SERVICE_NAME=migrate
     volumes:
@@ -102,16 +102,15 @@ services:
 
   db:
     image: postgres:16
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=async_notification_system
+    env_file:
+      - .env.docker
     volumes:
       - ans-db-data:/var/lib/postgresql/data
     networks:
       - ans-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d async_notification_system"]
+      test:
+        ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 5
