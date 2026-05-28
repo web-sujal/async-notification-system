@@ -18,6 +18,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         ["CMD-SHELL", "curl -f http://localhost:8080/health > /dev/null 2>&1"]
@@ -44,6 +46,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   relay:
     build:
@@ -62,6 +66,25 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=migrate
+    volumes:
+      - ans-logs:/app/logs
+    networks:
+      - ans-net
+    command: ["node", "dist/src/db/migrate.js"]
+    depends_on:
+      db:
         condition: service_healthy
 
   redis:
