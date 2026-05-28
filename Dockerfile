@@ -5,7 +5,7 @@ WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
 
-RUN corepack enable pnpm \
+RUN corepack enable \
   && pnpm add esbuild@0.28.0 msgpackr-extract@3.0.4 --allow-build=esbuild --allow-build=msgpackr-extract \
   && pnpm install --frozen-lockfile
 
