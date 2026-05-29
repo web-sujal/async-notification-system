@@ -357,7 +357,7 @@ pnpm docker:build  # build images only
 | ------ | ---------- | ------- |
 | `ans-db-data` | Postgres data dir | Database persistence |
 | `ans-redis-data` | Redis data dir | Redis persistence |
-| `ans-logs` | `/app/logs` on app containers | Shared Winston log files |
+| `ans-logs` | `/app/logs` on app containers | Shared Winston log files (`logs/` relative to `WORKDIR`) |
 
 Use **separate volumes** per service type — never share one volume across Postgres, Redis, and logs.
 
@@ -513,6 +513,8 @@ Do **not** duplicate every console line to logger. Console = operational; logger
 
 ### Log files
 
+Winston always writes to `logs/` relative to the process working directory (`./logs` locally, `/app/logs` in Docker where `WORKDIR=/app` and the compose volume mounts `ans-logs` there).
+
 Rotated daily via symlinks:
 
 ```
@@ -555,7 +557,6 @@ Environment variables are validated at startup in `src/config/config.ts` with Zo
 | `NODE_ENV`          | `development` | `development` \| `production` \| `test`           |
 | `PORT`              | `8080`        | HTTP port                                         |
 | `CORS_ORIGINS`      | (empty)       | Comma-separated origins; empty = allow all in dev |
-| `LOG_DIR`           | `logs`        | Log file directory                                |
 | `LOG_LEVEL`         | `warn`        | Min level in production (`debug` forced in dev)   |
 | `SERVICE_NAME`      | `api`         | Log prefix: `api`, `worker`, or `relay`           |
 | `DATABASE_URL`      | required      | Postgres connection string                        |
