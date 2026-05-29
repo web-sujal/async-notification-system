@@ -12,10 +12,22 @@ x-base-app: &base-app
   restart: unless-stopped
 
 services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    networks:
+      - ans-net
+    depends_on:
+      api:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
   api:
     <<: *base-app
-    ports:
-      - "8080:8080"
     environment:
       SERVICE_NAME: api
     depends_on:

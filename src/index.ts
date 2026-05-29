@@ -15,6 +15,7 @@ import { v1Router } from "./routes/v1/index.js";
 import { sendData } from "./utils/apiSuccess.js";
 
 const app = express();
+app.set("trust proxy", 1); // trust proxy headers for nginx
 
 app.use(helmet());
 
