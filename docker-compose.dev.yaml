@@ -1,0 +1,64 @@
+# Dev override: builder target + tsx watch + compose watch sync
+x-base-app: &base-app
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: builder
+  env_file:
+    - .env.docker.development
+  networks:
+    - ans-net
+  volumes:
+    - ans-logs:/app/logs
+  develop:
+    watch:
+      - path: ./package.json
+        action: rebuild
+      - path: ./pnpm-lock.yaml
+        action: rebuild
+      - path: ./src
+        action: sync+restart
+        target: /app/src
+      - path: ./migrations
+        action: sync+restart
+        target: /app/migrations
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  api:
+    <<: *base-app
+    command: ["pnpm", "dev"]
+    healthcheck:
+      disable: true
+
+  worker:
+    <<: *base-app
+    command: ["pnpm", "dev:worker"]
+
+  relay:
+    <<: *base-app
+    command: ["pnpm", "dev:relay"]
+
+  migrate:
+    <<: *base-app
+    restart: "no"
+    command: ["pnpm", "migration:run"]
+    depends_on:
+      db:
+        condition: service_healthy # Overrides base
+
+  redis:
+    env_file:
+      - .env.docker.development
+
+  db:
+    env_file:
+      - .env.docker.development
+    ports:
+      - "5432:5432"

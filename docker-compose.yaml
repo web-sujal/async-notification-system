@@ -1,0 +1,112 @@
+# Shared app image: build once, run as api / worker / relay / migrate
+x-base-app: &base-app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env.docker
+  networks:
+    - ans-net
+  volumes:
+    - ans-logs:/app/logs
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *base-app
+    ports:
+      - "8080:8080"
+    environment:
+      SERVICE_NAME: api
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:8080/health > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    <<: *base-app
+    command: ["node", "dist/src/worker.js"]
+    environment:
+      SERVICE_NAME: worker
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  relay:
+    <<: *base-app
+    command: ["node", "dist/src/relay.js"]
+    environment:
+      SERVICE_NAME: relay
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    <<: *base-app
+    restart: "no"
+    command: ["node", "dist/src/db/migrate.js"]
+    environment:
+      SERVICE_NAME: migrate
+    depends_on:
+      db:
+        condition: service_healthy
+
+  redis:
+    image: redis:8
+    restart: unless-stopped
+    volumes:
+      - ans-redis-data:/data
+    networks:
+      - ans-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db:
+    image: postgres:16
+    env_file:
+      - .env.docker
+    restart: unless-stopped
+    volumes:
+      - ans-db-data:/var/lib/postgresql/data
+    networks:
+      - ans-net
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  ans-logs:
+    driver: local
+  ans-redis-data:
+    driver: local
+  ans-db-data:
+    driver: local
+
+networks:
+  ans-net:
+    driver: bridge
