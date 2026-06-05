@@ -17,7 +17,8 @@
     "test": "NODE_ENV=test vitest run",
     "test:watch": "NODE_ENV=test vitest",
     "migration:run": "SERVICE_NAME=migrate tsx src/db/migrate.ts",
-    "docker:start": "docker compose up -d --build",
+    "docker:build": "docker compose build",
+    "docker:start": "docker compose up -d",
     "docker:dev": "docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up --watch"
   },
   "keywords": [

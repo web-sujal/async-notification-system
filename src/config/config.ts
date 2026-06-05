@@ -17,7 +17,6 @@ const envSchema = z.object({
 
   CORS_ORIGINS: z.string().optional(),
 
-  LOG_DIR: z.string().default("logs"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("warn"),
   SERVICE_NAME: z.string().default("api"),
 
@@ -56,7 +55,6 @@ export const config = {
       : [],
   },
   logger: {
-    logDir: env.LOG_DIR,
     logLevel: env.LOG_LEVEL,
     serviceName: env.SERVICE_NAME,
   },

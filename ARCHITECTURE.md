@@ -15,6 +15,8 @@ Async Notification System — an Express + TypeScript API backed by PostgreSQL a
 | Validation | Zod                                                                |
 | Logging    | Winston (files) + Morgan + `console.*` (terminal)                  |
 | Queue      | BullMQ + Redis                                                     |
+| Container  | Docker (multi-stage) + Docker Compose                              |
+| Reverse proxy | Nginx (Compose prod stack)                                      |
 | Tests      | Vitest + Supertest                                                 |
 
 ## Project structure
@@ -41,8 +43,16 @@ src/
 └── utils/            # ApiError, asyncHandler, validate, sendData
 
 migrations/           # numbered .sql migration files
+nginx/conf.d/         # Nginx reverse-proxy config (Compose prod)
 test/                 # integration tests
 logs/                 # rotated log files (gitignored)
+
+Dockerfile            # multi-stage: builder → prod-deps → runner
+docker-compose.yaml   # prod stack (Nginx + app + db + redis + migrate)
+docker-compose.dev.yaml  # dev override (tsx watch, compose watch, exposed db port)
+.env.example          # local pnpm dev (localhost hosts)
+.env.docker.example   # Compose prod containers (db/redis service names)
+.env.docker.development.example  # Compose dev containers
 ```
 
 ## Request flow
@@ -97,11 +107,11 @@ repository          UPDATE … SET is_delivered = TRUE
 
 Delivery runs across **three separate processes**. The API never talks to Redis directly — it writes intent to Postgres; the relay publishes to BullMQ.
 
-| Process | Entry | Script | Role |
-| ------- | ----- | ------ | ---- |
-| API | `src/index.ts` | `pnpm dev` | HTTP, atomic notification + outbox write |
-| Relay | `src/relay.ts` | `pnpm dev:relay` | Poll outbox, enqueue jobs to Redis |
-| Worker | `src/worker.ts` | `pnpm dev:worker` | Consume jobs, mark delivered |
+| Process | Entry | Local script | Docker (prod) |
+| ------- | ----- | ------------ | --------------- |
+| API | `src/index.ts` | `pnpm dev` | `command: node dist/src/index.js` |
+| Relay | `src/relay.ts` | `pnpm dev:relay` | `command: node dist/src/relay.js` |
+| Worker | `src/worker.ts` | `pnpm dev:worker` | `command: node dist/src/worker.js` |
 
 ### End-to-end flow
 
@@ -210,6 +220,146 @@ The DLQ is a parking lot for inspection/replay — no DLQ worker by default. Fai
 Mounted at `/admin/queues` from `notification.queue.ts`. Shows both `notification` and `notification-dlq`. Read-only visibility into Redis job state — data is stored under `bull:notification:*` and `bull:notification-dlq:*`.
 
 Do not expose in production without auth.
+
+## Deployment (Docker)
+
+The full stack can run locally or on a server via Docker Compose — one **Dockerfile**, two compose files (prod + dev override).
+
+### Runtime topology (prod)
+
+```mermaid
+flowchart LR
+  Client --> Nginx["nginx :80"]
+  Nginx --> API["api :8080"]
+  API --> Postgres[(db)]
+  API --> Redis[(redis)]
+  Relay --> Postgres
+  Relay --> Redis
+  Worker --> Postgres
+  Worker --> Redis
+  Migrate --> Postgres
+```
+
+| Service | Image / build | Role |
+| ------- | ------------- | ---- |
+| **nginx** | `nginx:alpine` | Reverse proxy to `api:8080` (only public HTTP entry) |
+| **api** | app image (`runner`) | Express API |
+| **worker** | same image, different `command` | BullMQ consumer |
+| **relay** | same image, different `command` | Outbox → Redis publisher |
+| **migrate** | same image, one-shot | SQL migrations, then exits |
+| **db** | `postgres:16` | PostgreSQL |
+| **redis** | `redis:8` | BullMQ backend |
+
+The API is **not** published to the host in prod compose — traffic goes through **Nginx on port 80**. Express sets `trust proxy` for correct client IP / scheme behind Nginx.
+
+### Dockerfile stages
+
+| Stage | Target | Purpose |
+| ----- | ------ | ------- |
+| **builder** | `builder` (dev compose) | Full deps, `pnpm install`, `pnpm build` — includes devDependencies (`tsx`) |
+| **prod-deps** | (intermediate, discarded) | `pnpm prune --prod` — corepack only here, not in final image |
+| **runner** | default (prod) | Slim runtime: `dist/`, pruned `node_modules/`, `migrations/`, `curl` for healthcheck |
+
+Dev compose uses `target: builder` so `pnpm dev` / `tsx --watch` work inside containers. Prod uses `runner` — no pnpm/corepack in the final image.
+
+Native modules (`esbuild`, `msgpackr-extract`) are built during the builder stage for Alpine + BullMQ.
+
+### Compose: shared app config
+
+`docker-compose.yaml` defines a YAML anchor (`x-base-app`) shared by api, worker, relay, and migrate:
+
+- Same **build** context / Dockerfile
+- Same **env_file** (`.env.docker`)
+- Same **network** (`ans-net`) and **logs volume**
+- **`restart: unless-stopped`** on long-running app services
+- Per-service overrides: `command`, `SERVICE_NAME`, `depends_on`
+
+**migrate** overrides with `restart: "no"` — it is a job, not a daemon.
+
+### Startup order
+
+1. **db** / **redis** — healthchecks pass (`pg_isready`, `redis-cli ping`)
+2. **migrate** — runs `node dist/src/db/migrate.js`, exits 0
+3. **api**, **worker**, **relay** — start after migrate completes successfully
+4. **nginx** — starts after migrate; proxies to api when api is up
+
+App services use `depends_on` with `condition: service_healthy` (infra) and `service_completed_successfully` (migrate).
+
+### Healthchecks and restart
+
+| Service | Healthcheck | Restart |
+| ------- | ----------- | ------- |
+| **api** | `curl /health` (runner has curl) | `unless-stopped` |
+| **db** / **redis** | Built-in probes | `unless-stopped` |
+| **worker** / **relay** | None (background processes) | `unless-stopped` |
+| **migrate** | None | `no` |
+| **nginx** | None (optional later) | default |
+
+Worker/relay are not behind Nginx — no HTTP health endpoint needed for the proxy. Use logs, queue metrics, and restart policy for those.
+
+### Nginx
+
+Config: `nginx/conf.d/default.conf`
+
+- Listens on **80**
+- Dynamic upstream resolve (`127.0.0.11`) so Nginx tolerates api restarts
+- Forwards `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`
+
+Prod API URL: `http://localhost/api/v1/...` (port 80). Direct `:8080` is internal to the compose network only.
+
+### Environment files
+
+Three env files, three contexts:
+
+| File | Used by | Hostnames in URLs |
+| ---- | ------- | ----------------- |
+| `.env` | Local `pnpm dev` / `dev:worker` / `dev:relay` | `localhost` |
+| `.env.docker` | Prod compose (`env_file` on app + db) | `db`, `redis` (Compose service names) |
+| `.env.docker.development` | Dev compose override | `db`, `redis` |
+
+Copy from the matching `*.example` files. All are gitignored except the examples.
+
+**Important:** `${VAR}` in compose YAML is resolved from `.env` at the project root — not from `env_file`. The `db` service uses `env_file: .env.docker` so Postgres reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` at container start without hardcoding secrets in compose.
+
+| Variable | Purpose |
+| -------- | ------- |
+| `DATABASE_URL` | App connection string (`@db:5432` in Docker) |
+| `REDIS_URL` | BullMQ (`redis://redis:6379` in Docker) |
+| `POSTGRES_*` | Postgres container init + healthcheck |
+
+Dev credentials in compose are fine for local Docker. Production secrets should be injected via CI/CD or a secret manager — not committed.
+
+### Dev compose override
+
+`docker-compose.dev.yaml` merges over the base file:
+
+| Override | Effect |
+| -------- | ------ |
+| `target: builder` | Full dev deps, tsx |
+| `command: pnpm dev` / `dev:worker` / `dev:relay` | Hot reload inside containers |
+| `develop.watch` | Compose syncs `src/` and `migrations/` into containers |
+| `db.ports: 5432:5432` | Host tools (pgcli, GUI) against Docker Postgres |
+| API healthcheck disabled | Builder image has no curl |
+
+Inherited from base (not repeated in dev file): `depends_on`, networks, volumes, migrate gating, nginx, restart policies.
+
+Run:
+
+```bash
+pnpm docker:dev    # compose merge + watch
+pnpm docker:start  # prod stack, detached
+pnpm docker:build  # build images only
+```
+
+### Volumes (prod)
+
+| Volume | Mounted at | Purpose |
+| ------ | ---------- | ------- |
+| `ans-db-data` | Postgres data dir | Database persistence |
+| `ans-redis-data` | Redis data dir | Redis persistence |
+| `ans-logs` | `/app/logs` on app containers | Shared Winston log files (`logs/` relative to `WORKDIR`) |
+
+Use **separate volumes** per service type — never share one volume across Postgres, Redis, and logs.
 
 ## Layer responsibilities
 
@@ -363,6 +513,8 @@ Do **not** duplicate every console line to logger. Console = operational; logger
 
 ### Log files
 
+Winston always writes to `logs/` relative to the process working directory (`./logs` locally, `/app/logs` in Docker where `WORKDIR=/app` and the compose volume mounts `ans-logs` there).
+
 Rotated daily via symlinks:
 
 ```
@@ -405,11 +557,13 @@ Environment variables are validated at startup in `src/config/config.ts` with Zo
 | `NODE_ENV`          | `development` | `development` \| `production` \| `test`           |
 | `PORT`              | `8080`        | HTTP port                                         |
 | `CORS_ORIGINS`      | (empty)       | Comma-separated origins; empty = allow all in dev |
-| `LOG_DIR`           | `logs`        | Log file directory                                |
 | `LOG_LEVEL`         | `warn`        | Min level in production (`debug` forced in dev)   |
 | `SERVICE_NAME`      | `api`         | Log prefix: `api`, `worker`, or `relay`           |
 | `DATABASE_URL`      | required      | Postgres connection string                        |
 | `DATABASE_MAX_POOL` | `20`          | Max pool connections                              |
+| `POSTGRES_USER`     | —             | Docker db service init (via `.env.docker`)        |
+| `POSTGRES_PASSWORD` | —             | Docker db service init (via `.env.docker`)        |
+| `POSTGRES_DB`       | —             | Docker db service init (via `.env.docker`)        |
 | `REDIS_URL`         | required      | Redis connection string (BullMQ)                  |
 | `ENABLE_FAILURE_MODE` | `false`     | Worker randomly throws (~50%) to test retries/DLQ |
 | `ENABLE_DELAY_MODE` | `false`       | Worker sleeps after DB update before completing   |
@@ -445,6 +599,8 @@ notificationRepository.create(data);
 
 ## Scripts
 
+### Local (Node on host)
+
 | Command | Description |
 | ------- | ----------- |
 | `pnpm dev` | API with hot reload (`SERVICE_NAME=api`) |
@@ -459,6 +615,16 @@ notificationRepository.create(data);
 | `pnpm lint` | ESLint |
 | `pnpm format` | Prettier |
 
+### Docker
+
+| Command | Description |
+| ------- | ----------- |
+| `pnpm docker:build` | Build compose images |
+| `pnpm docker:start` | Prod stack (`docker-compose.yaml`), detached |
+| `pnpm docker:dev` | Dev override + Compose watch (`docker-compose.dev.yaml`) |
+
+Local dev needs Postgres + Redis on the host (or use `pnpm docker:dev` for infra + apps in Docker).
+
 ## Adding a new feature (checklist)
 
 1. **Migration** — `migrations/00N_description.sql`
@@ -468,3 +634,4 @@ notificationRepository.create(data);
 5. **Controller** — req/res handler in `src/controllers/`
 6. **Route** — wire validate + asyncHandler in `src/routes/v1/`
 7. **Async work** — outbox row in the same DB transaction as the write; relay enqueues; worker processes (keep all three processes separate)
+8. **Docker** — if touching runtime: update `Dockerfile`, compose env examples, and Nginx config as needed

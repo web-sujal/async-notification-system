@@ -6,7 +6,7 @@ import DailyRotateFile from "winston-daily-rotate-file";
 
 import { config } from "../config/config.js";
 
-const logsDir = path.join(process.cwd(), config.logger.logDir);
+const logsDir = path.join(process.cwd(), "logs");
 const loggerFile = fileURLToPath(import.meta.url);
 
 if (!fs.existsSync(logsDir)) {
