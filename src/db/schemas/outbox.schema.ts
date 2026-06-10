@@ -7,7 +7,7 @@ export const outboxEventSchema = z.object({
   aggregateType: z.string(),
   eventType: z.string(),
 
-  payload: z.record(z.any(), z.any()),
+  payload: z.record(z.string(), z.unknown()),
 
   createdAt: z.date(),
   processedAt: z.date().nullable(),
@@ -34,7 +34,7 @@ export type OutboxEventRow = {
   aggregate_type: string;
   event_type: string;
 
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 
   created_at: Date;
   processed_at: Date | null;
