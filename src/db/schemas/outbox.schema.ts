@@ -1,4 +1,8 @@
+import type postgres from "postgres";
 import { z } from "zod";
+
+/** JSON-serializable value accepted by postgres.js `sql.json()`. */
+export type OutboxPayload = postgres.JSONValue;
 
 export const outboxEventSchema = z.object({
   id: z.uuid(),
@@ -7,7 +11,7 @@ export const outboxEventSchema = z.object({
   aggregateType: z.string(),
   eventType: z.string(),
 
-  payload: z.record(z.any(), z.any()),
+  payload: z.custom<OutboxPayload>(),
 
   createdAt: z.date(),
   processedAt: z.date().nullable(),
@@ -34,7 +38,7 @@ export type OutboxEventRow = {
   aggregate_type: string;
   event_type: string;
 
-  payload: Record<string, any>;
+  payload: OutboxPayload;
 
   created_at: Date;
   processed_at: Date | null;

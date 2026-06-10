@@ -74,7 +74,9 @@ notificationWorker.on("failed", async (job, err) => {
       failure: {
         reason: err.message,
         stackTrace:
-          (err as any).stackTrace ?? err.stack ?? "Unknown stack trace",
+          "stackTrace" in err && typeof err.stackTrace === "string"
+            ? err.stackTrace
+            : (err.stack ?? "Unknown stack trace"),
         attemptsMade: currentAttempt,
         failedAt: new Date().toISOString(),
       },
