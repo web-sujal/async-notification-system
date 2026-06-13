@@ -1,8 +1,6 @@
 # Shared app image: build once, run as api / worker / relay / migrate
 x-base-app: &base-app
-  build:
-    context: .
-    dockerfile: Dockerfile
+  image: "988698482196.dkr.ecr.ap-south-1.amazonaws.com/async-notification-system:b72ea082cefc470f6510b898c4f45f3c264616b3"
   env_file:
     - .env.docker
   networks:

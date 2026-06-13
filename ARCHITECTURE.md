@@ -229,7 +229,7 @@ The full stack can run locally or on a server via Docker Compose — one **Docke
 
 ```mermaid
 flowchart LR
-  Client --> Nginx["nginx :80"]
+  Client --> Nginx["nginx :80 (host :8080)"]
   Nginx --> API["api :8080"]
   API --> Postgres[(db)]
   API --> Redis[(redis)]
@@ -242,7 +242,7 @@ flowchart LR
 
 | Service | Image / build | Role |
 | ------- | ------------- | ---- |
-| **nginx** | `nginx:alpine` | Reverse proxy to `api:8080` (only public HTTP entry) |
+| **nginx** | `nginx:alpine` | Reverse proxy to `api:8080` (host `8080` → container `80`) |
 | **api** | app image (`runner`) | Express API |
 | **worker** | same image, different `command` | BullMQ consumer |
 | **relay** | same image, different `command` | Outbox → Redis publisher |
@@ -250,7 +250,7 @@ flowchart LR
 | **db** | `postgres:16` | PostgreSQL |
 | **redis** | `redis:8` | BullMQ backend |
 
-The API is **not** published to the host in prod compose — traffic goes through **Nginx on port 80**. Express sets `trust proxy` for correct client IP / scheme behind Nginx.
+The API is **not** published directly to the host — traffic goes through **Nginx on port 8080**. Express sets `trust proxy` for correct client IP / scheme behind Nginx.
 
 ### Dockerfile stages
 
@@ -301,11 +301,11 @@ Worker/relay are not behind Nginx — no HTTP health endpoint needed for the pro
 
 Config: `nginx/conf.d/default.conf`
 
-- Listens on **80**
+- Listens on **80** inside the container; compose maps **host `8080:80`**
 - Dynamic upstream resolve (`127.0.0.11`) so Nginx tolerates api restarts
 - Forwards `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`
 
-Prod API URL: `http://localhost/api/v1/...` (port 80). Direct `:8080` is internal to the compose network only.
+Prod API URL: `http://localhost:8080/api/v1/...` (Nginx on container port 80). The `api` service `:8080` is internal only.
 
 ### Environment files
 
