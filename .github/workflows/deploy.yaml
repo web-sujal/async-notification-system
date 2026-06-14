@@ -44,6 +44,11 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            cd /home/${{ secrets.SSH_USERNAME }}
+
+            # Login to ECR
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
+
             # Remove any existing line 
             sed -i '/IMAGE_TAG/d' .env.docker
 
