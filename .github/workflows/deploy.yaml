@@ -39,6 +39,10 @@ jobs:
 
       - name: SSH into EC2 instance
         uses: appleboy/ssh-action@v1
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          AWS_REGION: ${{ env.AWS_REGION }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
@@ -47,13 +51,13 @@ jobs:
             cd /home/${{ secrets.SSH_USERNAME }}
 
             # Login to ECR
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
+            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
             # Remove any existing line 
             sed -i '/IMAGE_TAG/d' .env.docker
 
             # Add the new line
-            echo "IMAGE_TAG=${{ github.sha }}" >> .env.docker
+            echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
 
             # Pull the new image
             docker compose -f docker-compose.prod.yaml pull
