@@ -48,6 +48,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
+          envs: ECR_REGISTRY,IMAGE_TAG,AWS_REGION,SSH_USERNAME
           script: |
             set -e
 
