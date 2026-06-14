@@ -70,33 +70,7 @@ jobs:
             echo "🔄 [Restart] Spinning up new containers and removing obsolete instances..."
             docker compose -f docker-compose.prod.yaml up -d
 
+            echo "🧹 [Cleanup] Removing dangling images from previous builds..."
+            docker image prune -f
+
             echo "✨ [Success] Pipeline completed successfully! Service is now live."
-
-      # - name: SSH into EC2 instance
-      #   uses: appleboy/ssh-action@v1
-      #   env:
-      #     ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-      #     IMAGE_TAG: ${{ github.sha }}
-      #     AWS_REGION: ${{ env.AWS_REGION }}
-      #     SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
-      #   with:
-      #     host: ${{ secrets.SSH_HOST }}
-      #     username: ${{ secrets.SSH_USERNAME }}
-      #     key: ${{ secrets.SSH_KEY }}
-      #     script: |
-      #       cd /home/$SSH_USERNAME
-
-      #       # Login to ECR
-      #       aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
-
-      #       # Remove any existing line
-      #       sed -i '/IMAGE_TAG/d' .env.docker
-
-      #       # Add the new line
-      #       echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
-
-      #       # Pull the new image
-      #       docker compose -f docker-compose.prod.yaml pull
-
-      #       # Start the new containers
-      #       docker compose -f docker-compose.prod.yaml up -d
