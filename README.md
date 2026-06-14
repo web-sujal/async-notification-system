@@ -24,7 +24,7 @@ cp .env.example .env
 pnpm docker:start
 ```
 
-Open **http://localhost** (Nginx on port 80). Migrations run automatically on first boot.
+Open **http://localhost:8080** (Nginx). Migrations run automatically on first boot.
 
 **Dev stack** (tsx hot reload + Compose file watch, Postgres exposed on `5432` for pgcli):
 
@@ -58,7 +58,7 @@ Requires Postgres and Redis running locally. Use `.env` with `localhost` URLs.
 
 | Command | Description |
 | ------- | ----------- |
-| `pnpm dev` | API (`http://localhost:8080`) |
+| `pnpm dev` | API |
 | `pnpm dev:relay` | Outbox relay |
 | `pnpm dev:worker` | Delivery worker |
 | `pnpm migration:run` | Apply SQL migrations |
@@ -69,17 +69,9 @@ Run **API + relay + worker** in separate terminals for full delivery locally.
 
 ## API
 
-Create a notification (saved to DB, outbox → relay → queue → worker):
+Docker and local dev both use **http://localhost:8080** (Docker via Nginx).
 
-**Docker** (via Nginx):
-
-```bash
-curl -sS -X POST "http://localhost/api/v1/notifications" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Hello", "content": "World"}' | jq
-```
-
-**Local `pnpm dev`:**
+Create a notification:
 
 ```bash
 curl -sS -X POST "http://localhost:8080/api/v1/notifications" \
@@ -90,11 +82,10 @@ curl -sS -X POST "http://localhost:8080/api/v1/notifications" \
 Health check:
 
 ```bash
-curl http://localhost/health          # Docker
-curl http://localhost:8080/health     # local dev
+curl -sS http://localhost:8080/health | jq
 ```
 
-Bull Board (dev): **http://localhost/admin/queues** (Docker) or **http://localhost:8080/admin/queues** (local).
+Bull Board: **http://localhost:8080/admin/queues**
 
 ## Architecture
 
