@@ -44,5 +44,14 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            docker compose pull
-            docker compose up -d
+            # Remove any existing line 
+            sed -i '/IMAGE_TAG/d' .env.docker
+
+            # Add the new line
+            echo "IMAGE_TAG=${{ github.sha }}" >> .env.docker
+
+            # Pull the new image
+            docker compose -f docker-compose.prod.yaml pull
+
+            # Start the new containers
+            docker compose -f docker-compose.prod.yaml up -d
