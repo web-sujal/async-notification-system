@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup AWS ECR Details
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -37,6 +37,26 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+      - name: Copy docker-compose.prod.yaml and nginx/conf.d/default.conf to EC2
+        env:
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          # Create temporary PEM file
+          echo "🔑 [SSH Key -> PEM File] Create temporary PEM file..."
+
+          # Write SSH key to temporary PEM file
+          echo "$SSH_KEY" > /tmp/ssh_key.pem
+          chmod 400 /tmp/ssh_key.pem
+
+          # Copy docker-compose.prod.yaml to EC2
+          scp -i /tmp/ssh_key.pem docker-compose.prod.yaml ${{ env.SSH_USERNAME }}@${{ env.SSH_HOST }}:/home/$SSH_USERNAME/docker-compose.prod.yaml
+
+          # Copy nginx/conf.d/default.conf to EC2
+          ssh -i /tmp/ssh_key.pem ${{ env.SSH_USERNAME }}@${{ env.SSH_HOST }} "mkdir -p /home/$SSH_USERNAME/nginx/conf.d"
+          scp -i /tmp/ssh_key.pem nginx/conf.d/default.conf ${{ env.SSH_USERNAME }}@${{ env.SSH_HOST }}:/home/$SSH_USERNAME/nginx/conf.d/default.conf
+
       - name: SSH into EC2 instance
         uses: appleboy/ssh-action@v1
         env:
@@ -50,6 +70,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           envs: ECR_REGISTRY,IMAGE_TAG,AWS_REGION,SSH_USERNAME
           script: |
+            # Exit immediately if any command fails (non-zero status).
             set -e
 
             echo "🚀 [Deploy] Initiating deployment sequence on EC2..."
