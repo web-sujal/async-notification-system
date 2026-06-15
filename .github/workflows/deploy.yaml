@@ -27,10 +27,6 @@ jobs:
           role-to-assume: "arn:aws:iam::988698482196:role/github-actions-ecr-oidc-role"
           aws-region: ${{ env.AWS_REGION }}
 
-      # FIXME: Remove this step
-      - name: Who am I
-        run: aws sts get-caller-identity
-
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
