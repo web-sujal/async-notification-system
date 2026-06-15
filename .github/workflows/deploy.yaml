@@ -9,6 +9,10 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -17,12 +21,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup AWS ECR Details
-        uses: aws-actions/configure-aws-credentials@v1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: "arn:aws:iam::988698482196:role/github-actions-ecr-oidc-role"
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Who am I
+        run: aws sts get-caller-identity
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -37,6 +43,31 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+      - name: Copy docker-compose.prod.yaml and nginx/conf.d/default.conf to EC2
+        env:
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          # Create the .ssh directory
+          mkdir -p ~/.ssh
+
+          # Fetch the remote server's public key and add it to known_hosts
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+
+          # Create temporary PEM file
+          echo "🔑 [SSH Key -> PEM File] Create temporary PEM file..."
+
+          echo "$SSH_KEY" > /tmp/ssh_key.pem
+          chmod 600 /tmp/ssh_key.pem
+
+          # Copy docker-compose.prod.yaml to EC2
+          scp -i /tmp/ssh_key.pem docker-compose.prod.yaml $SSH_USERNAME@$SSH_HOST:/home/$SSH_USERNAME/docker-compose.prod.yaml
+
+          # Copy nginx/conf.d/default.conf to EC2
+          ssh -i /tmp/ssh_key.pem $SSH_USERNAME@$SSH_HOST "mkdir -p /home/$SSH_USERNAME/nginx/conf.d"
+          scp -i /tmp/ssh_key.pem nginx/conf.d/default.conf $SSH_USERNAME@$SSH_HOST:/home/$SSH_USERNAME/nginx/conf.d/default.conf
+
       - name: SSH into EC2 instance
         uses: appleboy/ssh-action@v1
         env:
@@ -50,6 +81,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           envs: ECR_REGISTRY,IMAGE_TAG,AWS_REGION,SSH_USERNAME
           script: |
+            # Exit immediately if any command fails (non-zero status).
             set -e
 
             echo "🚀 [Deploy] Initiating deployment sequence on EC2..."
@@ -61,8 +93,14 @@ jobs:
             aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
             echo "📝 [Env Update] Injection sequence: updating .env.docker with IMAGE_TAG=$IMAGE_TAG"
-            sed -i '/IMAGE_TAG/d' .env.docker
-            echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
+            if [ -f .env.docker ]; then
+              sed -i '/IMAGE_TAG/d' .env.docker
+              echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
+            else
+              # throw error
+              echo "🚨 [Error] .env.docker file not found"
+              exit 1
+            fi
 
             echo "📥 [Pull] Fetching the latest container versions from ECR registry..."
             docker compose -f docker-compose.prod.yaml pull
@@ -70,33 +108,7 @@ jobs:
             echo "🔄 [Restart] Spinning up new containers and removing obsolete instances..."
             docker compose -f docker-compose.prod.yaml up -d
 
+            echo "🧹 [Cleanup] Removing dangling images from previous builds..."
+            docker image prune -f
+
             echo "✨ [Success] Pipeline completed successfully! Service is now live."
-
-      # - name: SSH into EC2 instance
-      #   uses: appleboy/ssh-action@v1
-      #   env:
-      #     ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-      #     IMAGE_TAG: ${{ github.sha }}
-      #     AWS_REGION: ${{ env.AWS_REGION }}
-      #     SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
-      #   with:
-      #     host: ${{ secrets.SSH_HOST }}
-      #     username: ${{ secrets.SSH_USERNAME }}
-      #     key: ${{ secrets.SSH_KEY }}
-      #     script: |
-      #       cd /home/$SSH_USERNAME
-
-      #       # Login to ECR
-      #       aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
-
-      #       # Remove any existing line
-      #       sed -i '/IMAGE_TAG/d' .env.docker
-
-      #       # Add the new line
-      #       echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
-
-      #       # Pull the new image
-      #       docker compose -f docker-compose.prod.yaml pull
-
-      #       # Start the new containers
-      #       docker compose -f docker-compose.prod.yaml up -d
