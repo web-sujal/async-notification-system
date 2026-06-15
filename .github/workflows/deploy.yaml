@@ -43,19 +43,24 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_KEY: ${{ secrets.SSH_KEY }}
         run: |
+          # Create the .ssh directory
+          mkdir -p ~/.ssh
+
+          # Fetch the remote server's public key and add it to known_hosts
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+
           # Create temporary PEM file
           echo "🔑 [SSH Key -> PEM File] Create temporary PEM file..."
 
-          # Write SSH key to temporary PEM file
           echo "$SSH_KEY" > /tmp/ssh_key.pem
-          chmod 400 /tmp/ssh_key.pem
+          chmod 600 /tmp/ssh_key.pem
 
           # Copy docker-compose.prod.yaml to EC2
-          scp -i /tmp/ssh_key.pem docker-compose.prod.yaml ${{ env.SSH_USERNAME }}@${{ env.SSH_HOST }}:/home/$SSH_USERNAME/docker-compose.prod.yaml
+          scp -i /tmp/ssh_key.pem docker-compose.prod.yaml $SSH_USERNAME@$SSH_HOST:/home/$SSH_USERNAME/docker-compose.prod.yaml
 
           # Copy nginx/conf.d/default.conf to EC2
-          ssh -i /tmp/ssh_key.pem ${{ env.SSH_USERNAME }}@${{ env.SSH_HOST }} "mkdir -p /home/$SSH_USERNAME/nginx/conf.d"
-          scp -i /tmp/ssh_key.pem nginx/conf.d/default.conf ${{ env.SSH_USERNAME }}@${{ env.SSH_HOST }}:/home/$SSH_USERNAME/nginx/conf.d/default.conf
+          ssh -i /tmp/ssh_key.pem $SSH_USERNAME@$SSH_HOST "mkdir -p /home/$SSH_USERNAME/nginx/conf.d"
+          scp -i /tmp/ssh_key.pem nginx/conf.d/default.conf $SSH_USERNAME@$SSH_HOST:/home/$SSH_USERNAME/nginx/conf.d/default.conf
 
       - name: SSH into EC2 instance
         uses: appleboy/ssh-action@v1
