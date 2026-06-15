@@ -82,8 +82,14 @@ jobs:
             aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
             echo "📝 [Env Update] Injection sequence: updating .env.docker with IMAGE_TAG=$IMAGE_TAG"
-            sed -i '/IMAGE_TAG/d' .env.docker
-            echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
+            if [ -f .env.docker ]; then
+              sed -i '/IMAGE_TAG/d' .env.docker
+              echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
+            else
+              # throw error
+              echo "🚨 [Error] .env.docker file not found"
+              exit 1
+            fi
 
             echo "📥 [Pull] Fetching the latest container versions from ECR registry..."
             docker compose -f docker-compose.prod.yaml pull
