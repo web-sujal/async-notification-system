@@ -27,6 +27,7 @@ jobs:
           role-to-assume: "arn:aws:iam::988698482196:role/github-actions-ecr-oidc-role"
           aws-region: ${{ env.AWS_REGION }}
 
+      # FIXME: Remove this step
       - name: Who am I
         run: aws sts get-caller-identity
 
@@ -94,6 +95,8 @@ jobs:
 
             echo "📝 [Env Update] Injection sequence: updating .env.docker with IMAGE_TAG=$IMAGE_TAG"
             if [ -f .env.docker ]; then
+              ROLLBACK_IMAGE_TAG=$(grep '^IMAGE_TAG' .env.docker | cut -d= -f2)
+
               sed -i '/IMAGE_TAG/d' .env.docker
               echo "IMAGE_TAG=$IMAGE_TAG" >> .env.docker
             else
@@ -107,6 +110,33 @@ jobs:
 
             echo "🔄 [Restart] Spinning up new containers and removing obsolete instances..."
             docker compose -f docker-compose.prod.yaml up -d
+
+            # Wait for health via nginx 
+            echo "⛑️ Waiting for http://localhost:8080/health..."
+
+            HEALTH_OK=false
+            for i in {1..30}; do
+              if curl -sSf http://localhost:8080/health > /dev/null; then
+                echo "✅ Health check passed (via nginx)"
+                HEALTH_OK=true
+                break
+              fi
+
+              echo "Waiting for health... ($i/30)"
+              sleep 2
+            done
+
+            if [ "$HEALTH_OK" != "true" ]; then
+              echo "🚨 Healthcheck failed, rolling back"
+
+              sed -i '/IMAGE_TAG/d' .env.docker
+              echo "IMAGE_TAG=$ROLLBACK_IMAGE_TAG" >> .env.docker
+
+              docker compose -f docker-compose.prod.yaml pull
+              docker compose -f docker-compose.prod.yaml up -d
+
+              exit 1
+            fi
 
             echo "🧹 [Cleanup] Removing dangling images from previous builds..."
             docker image prune -f
